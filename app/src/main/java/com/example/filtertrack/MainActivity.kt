@@ -3,41 +3,38 @@ package com.example.filtertrack
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.TextView
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 
-class MainActivity : AppCompatActivity(), BLEManager.BLEListener {
+class MainActivity : AppCompatActivity(),
+    BLEManager.BLEListener,
+    BLEManager.DataListener {
 
+    private lateinit var webView: WebView
     private lateinit var bleManager: BLEManager
-    private lateinit var btnStartScan: Button
-    private lateinit var tvStatus: TextView
-    private lateinit var rvDevices: RecyclerView
-    private val deviceList = mutableListOf<BluetoothDevice>()
-    private val deviceAdapter by lazy { DeviceAdapter(deviceList) { device ->
-        bleManager.connect(device)
-    } }
+
+    @Volatile private var pageReady = false
+    private val pendingJs = ArrayDeque<String>()
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val granted = permissions.entries.all { it.value }
-        if (granted) {
-            startBleScan()
+        if (permissions.values.all { it }) {
+            bleManager.startScan()
         } else {
-            Toast.makeText(this, "Permissions required for BLE", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Permissões BLE necessárias", Toast.LENGTH_SHORT).show()
+            push("onError", "Permissões BLE negadas")
         }
     }
 
@@ -45,96 +42,143 @@ class MainActivity : AppCompatActivity(), BLEManager.BLEListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+
         bleManager = BLEManager.getInstance(this)
         bleManager.bleListener = this
+        bleManager.dataListener = this
 
-        btnStartScan = findViewById(R.id.btnStartScan)
-        tvStatus = findViewById(R.id.tvStatus)
-        rvDevices = findViewById(R.id.rvDevices)
-
-        rvDevices.layoutManager = LinearLayoutManager(this)
-        rvDevices.adapter = deviceAdapter
-
-        btnStartScan.setOnClickListener {
-            checkPermissionsAndScan()
-        }
+        webView = findViewById(R.id.webView)
+        setupWebView()
     }
 
-    private fun checkPermissionsAndScan() {
-        val permissions = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupWebView() {
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            cacheMode = WebSettings.LOAD_DEFAULT
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        }
+        WebView.setWebContentsDebuggingEnabled(true)
+
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
+                android.util.Log.d("WebView", "[${msg.messageLevel()}] ${msg.message()} @${msg.lineNumber()}")
+                return true
+            }
         }
 
-        val missingPermissions = permissions.filter {
-            ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                pageReady = true
+                flushPending()
+            }
         }
 
-        if (missingPermissions.isEmpty()) {
-            startBleScan()
-        } else {
-            requestPermissionLauncher.launch(missingPermissions.toTypedArray())
+        val iface = WebAppInterface(bleManager) { action ->
+            runOnUiThread { handleAction(action) }
         }
+        webView.addJavascriptInter-face(iface, "Android")
+
+        webView.loadUrl("file:///android_asset/index.html")
     }
 
-    private fun startBleScan() {
-        deviceList.clear()
-        deviceAdapter.notifyDataSetChanged()
-        tvStatus.text = "Status: Scanning..."
-        bleManager.startScan()
-    }
-
-    override fun onDeviceFound(device: BluetoothDevice) {
-        if (!deviceList.contains(device)) {
-            deviceList.add(device)
-            deviceAdapter.notifyItemInserted(deviceList.size - 1)
-        }
-    }
-
-    override fun onConnectionStateChanged(status: String) {
-        runOnUiThread {
-            tvStatus.text = "Status: $status"
-            if (status == "Connected") {
-                val intent = Intent(this, DeviceControlActivity::class.java)
-                startActivity(intent)
+    private fun handleAction(action: WebAppInterface.Action) {
+        when (action) {
+            WebAppInterface.Action.StartScan -> checkPermissionsAndScan()
+            WebAppInterface.Action.StopScan -> bleManager.stopScan()
+            is WebAppInterface.Action.Connect -> bleManager.connect(action.address)
+            WebAppInterface.Action.Disconnect -> bleManager.disconnect()
+            is WebAppInterface.Action.SendCommand -> {
+                val ok = bleManager.sendCommand(action.cmd)
+                if (!ok) push("onError", "Falha ao enviar comando")
             }
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        // Don't disconnect here because we might be moving to DeviceControlActivity
-        if (bleManager.bleListener == this) {
-            bleManager.bleListener = null
+    private fun checkPermissionsAndScan() {
+        val needed = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            needed.add(Manifest.permission.BLUETOOTH_SCAN)
+            needed.add(Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val missing = needed.filter {
+            ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) bleManager.startScan()
+        else requestPermissionLauncher.launch(missing.toTypedArray())
+    }
+
+    // ── Push events from Kotlin → JS ──
+    private fun push(method: String, vararg args: Any?) {
+        val jsArgs = args.joinToString(",") { toJsLiteral(it) }
+        val js = "window.FilterTrackBridge && window.FilterTrackBridge.$method($jsArgs);"
+        if (pageReady) {
+            webView.post { webView.evaluateJavascript(js, null) }
+        } else {
+            pendingJs.addLast(js)
         }
     }
 
-    class DeviceAdapter(
-        private val devices: List<BluetoothDevice>,
-        private val onClick: (BluetoothDevice) -> Unit
-    ) : RecyclerView.Adapter<DeviceAdapter.ViewHolder>() {
-
-        class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-            val name: TextView = view.findViewById(R.id.tvDeviceName)
-            val address: TextView = view.findViewById(R.id.tvDeviceAddress)
+    private fun flushPending() {
+        while (pendingJs.isNotEmpty()) {
+            val js = pendingJs.removeFirst()
+            webView.post { webView.evaluateJavascript(js, null) }
         }
+    }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_device, parent, false)
-            return ViewHolder(view)
-        }
+    private fun toJsLiteral(v: Any?): String = when (v) {
+        null -> "null"
+        is Number, is Boolean -> v.toString()
+        else -> "\"" + v.toString()
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r") + "\""
+    }
 
-        @SuppressLint("MissingPermission")
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val device = devices[position]
-            holder.name.text = device.name ?: "Unknown Device"
-            holder.address.text = device.address
-            holder.itemView.setOnClickListener { onClick(device) }
-        }
+    // ── BLEManager.BLEListener ──
+    @SuppressLint("MissingPermission")
+    override fun onDeviceFound(device: BluetoothDevice, rssi: Int) {
+        val name = try { device.name } catch (_: SecurityException) { null } ?: "Desconhecido"
+        push("onDeviceFound", name, device.address, rssi)
+    }
 
-        override fun getItemCount() = devices.size
+    override fun onConnectionStateChanged(status: String, deviceName: String?, deviceAddress: String?) {
+        push("onConnectionStateChanged", status, deviceName, deviceAddress)
+    }
+
+    override fun onScanStateChanged(scanning: Boolean) {
+        push("onScanStateChanged", scanning)
+    }
+
+    override fun onRssiUpdate(rssi: Int) {
+        push("onRssiUpdate", rssi)
+    }
+
+    override fun onError(message: String) {
+        push("onError", message)
+    }
+
+    // ── BLEManager.DataListener ──
+    override fun onDataReceived(data: String) {
+        push("onDataReceived", data)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (bleManager.bleListener === this) bleManager.bleListener = null
+        if (bleManager.dataListener === this) bleManager.dataListener = null
+        try { webView.destroy() } catch (_: Throwable) {}
+    }
+
+    override fun onBackPressed() {
+        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }
 }
