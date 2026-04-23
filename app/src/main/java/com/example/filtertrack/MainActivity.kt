@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity(),
         val iface = WebAppInterface(bleManager) { action ->
             runOnUiThread { handleAction(action) }
         }
-        webView.addJavascriptInter-face(iface, "Android")
+        webView.addJavascriptInterface(iface, "Android")
 
         webView.loadUrl("file:///android_asset/index.html")
     }
