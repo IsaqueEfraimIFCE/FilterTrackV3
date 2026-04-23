@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>FilterTrack — Cagece</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #080c14; font-family: 'Space Grotesk', sans-serif; overflow: hidden; color: #f0f2f8; }
+  #root { width: 100vw; height: 100vh; display: flex; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const COLORS = {
+  bg0: '#080c14',
+  bg1: '#0f1420',
+  bg2: '#161d2e',
+  bg3: '#1e273a',
+  border: '#232d42',
+  blue: '#0068B4',
+  blueLight: '#1a8fd1',
+  teal: '#00A878',
+  tealLight: '#12c992',
+  amber: '#e8a930',
+  red: '#e84545',
+  text0: '#f0f2f8',
+  text1: '#b8bdd0',
+  text2: '#6b7490',
+  mono: "'DM Mono', monospace",
+};
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const fmtNum = (n, dec = 1) => (Number.isFinite(n) ? n.toFixed(dec) : '—');
+
+// ── Android BLE bridge ────────────────────────────────────────────────
+// Kotlin side exposes window.Android with:
+//   startScan(), stopScan(), connect(addr), disconnect(),
+//   sendCommand(cmd), isBluetoothEnabled()
+// Kotlin pushes events by calling window.FilterTrackBridge.*
+// We keep a pub/sub so React can subscribe.
+const bridge = (() => {
+  const listeners = new Set();
+  const state = {
+    scanning: false,
+    connected: false,
+    connectionStatus: 'Idle',
+    deviceName: '',
+    deviceAddress: '',
+    devices: [],       // { name, address, rssi }
+    lastData: null,    // { distance, raw, ts }
+    distanceHistory: [],
+    rssi: -90,
+    errorMsg: '',
+  };
+  const emit = () => listeners.forEach(fn => fn(state));
+  const sub = fn => { listeners.add(fn); fn(state); return () => listeners.delete(fn); };
+
+  window.FilterTrackBridge = {
+    onScanStateChanged(scanning) {
+      state.scanning = !!scanning;
+      if (scanning) state.devices = [];
+      emit();
+    },
+    onDeviceFound(name, address, rssi) {
+      const existing = state.devices.findIndex(d => d.address === address);
+      const entry = { name: name || 'Desconhecido', address, rssi: Number(rssi) || -90 };
+      if (existing >= 0) state.devices[existing] = entry;
+      else state.devices = [...state.devices, entry];
+      emit();
+    },
+    onConnectionStateChanged(status, deviceName, deviceAddress) {
+      state.connectionStatus = status;
+      state.connected = status === 'Connected';
+      if (state.connected) {
+        state.deviceName = deviceName || state.deviceName;
+        state.deviceAddress = deviceAddress || state.deviceAddress;
+      }
+      if (!state.connected) {
+        state.lastData = null;
+      }
+      emit();
+    },
+    onDataReceived(raw) {
+      const parsed = parsePayload(raw);
+      state.lastData = { ...parsed, raw, ts: Date.now() };
+      if (Number.isFinite(parsed.distance)) {
+        state.distanceHistory = [...state.distanceHistory.slice(-59), parsed.distance];
+      }
+      emit();
+    },
+    onRssiUpdate(rssi) {
+      state.rssi = Number(rssi) || state.rssi;
+      emit();
+    },
+    onError(msg) {
+      state.errorMsg = String(msg || '');
+      emit();
+      clearTimeout(onErrorTimer);
+      onErrorTimer = setTimeout(() => { state.errorMsg = ''; emit(); }, 4000);
+    },
+  };
+  let onErrorTimer = null;
+
+  function parsePayload(raw) {
+    const s = String(raw || '').trim();
+    if (s.startsWith('DIST=')) {
+      const v = parseFloat(s.slice(5));
+      return { distance: Number.isFinite(v) ? v : NaN, error: null };
+    }
+    if (s.startsWith('ERRO') || s.startsWith('ERR')) {
+      return { distance: NaN, error: s };
+    }
+    const v = parseFloat(s);
+    return { distance: Number.isFinite(v) ? v : NaN, error: null };
+  }
+
+  const call = (fn, ...args) => {
+    try {
+      if (window.Android && typeof window.Android[fn] === 'function') {
+        return window.Android[fn](...args);
+      }
+      console.warn('Android bridge not available:', fn);
+    } catch (e) { console.error('Bridge call failed', fn, e); }
+  };
+
+  return {
+    subscribe: sub,
+    startScan: () => call('startScan'),
+    stopScan: () => call('stopScan'),
+    connect: addr => call('connect', addr),
+    disconnect: () => call('disconnect'),
+    sendCommand: cmd => call('sendCommand', String(cmd)),
+    isBluetoothEnabled: () => { try { return call('isBluetoothEnabled') !== false; } catch (_) { return true; } },
+  };
+})();
+
+function useBLE() {
+  const [snap, setSnap] = useState({});
+  useEffect(() => bridge.subscribe(s => setSnap({ ...s })), []);
+  return { ...snap, ...bridge };
+}
+
+// ── Arc Gauge ─────────────────────────────────────────────────────────
+function ArcGauge({ value, min, max, label, unit, color, size = 120, warn, danger, decimals = 1 }) {
+  const canvasRef = useRef();
+  const hasValue = Number.isFinite(value);
+  const pct = hasValue ? (value - min) / (max - min) : 0;
+  const isWarn = warn && hasValue && value >= warn;
+  const isDanger = danger && hasValue && value >= danger;
+  const arcColor = isDanger ? COLORS.red : isWarn ? COLORS.amber : color;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size * dpr; canvas.height = size * dpr;
+    canvas.style.width = size + 'px'; canvas.style.height = size + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    const cx = size / 2, cy = size / 2, r = size * 0.38;
+    const startAngle = Math.PI * 0.75;
+    const endAngle = Math.PI * 2.25;
+    ctx.clearRect(0, 0, size, size);
+
+    ctx.beginPath(); ctx.arc(cx, cy, r, startAngle, endAngle);
+    ctx.strokeStyle = COLORS.bg3; ctx.lineWidth = size * 0.072; ctx.lineCap = 'round';
+    ctx.stroke();
+
+    if (pct > 0) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, startAngle, startAngle + (endAngle - startAngle) * clamp(pct, 0, 1));
+      ctx.strokeStyle = arcColor; ctx.lineWidth = size * 0.072; ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, startAngle, startAngle + (endAngle - startAngle) * clamp(pct, 0, 1));
+      ctx.strokeStyle = arcColor + '44'; ctx.lineWidth = size * 0.12; ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+  }, [value, size, arcColor, pct]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+      <div style={{ position: 'relative', width: size, height: size }}>
+        <canvas ref={canvasRef} />
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <span style={{ fontFamily: COLORS.mono, fontSize: size * 0.18, fontWeight: 500, color: arcColor, lineHeight: 1 }}>
+            {hasValue ? fmtNum(value, decimals) : '—'}
+          </span>
+          <span style={{ fontSize: size * 0.09, color: COLORS.text2, marginTop: 2 }}>{unit}</span>
+        </div>
+      </div>
+      <span style={{ fontSize: 10, color: COLORS.text2, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: -size * 0.06 }}>{label}</span>
+    </div>
+  );
+}
+
+// ── Sparkline ─────────────────────────────────────────────────────────
+function Sparkline({ data, color, height = 32, width = 120 }) {
+  const canvasRef = useRef();
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr; canvas.height = height * dpr;
+    canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+    if (!data || data.length < 2) return;
+    const mn = Math.min(...data), mx = Math.max(...data);
+    const range = mx - mn || 1;
+    const pts = data.map((v, i) => [i / (data.length - 1) * width, height - ((v - mn) / range) * (height - 4) - 2]);
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0, color + '55'); grad.addColorStop(1, color + '00');
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    pts.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+    ctx.lineTo(width, height); ctx.lineTo(0, height); ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    pts.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.stroke();
+  }, [data, color, height, width]);
+  return <canvas ref={canvasRef} style={{ display: 'block' }} />;
+}
+
+// ── Stat Chip ─────────────────────────────────────────────────────────
+function StatChip({ label, value, unit, color }) {
+  return (
+    <div style={{
+      background: COLORS.bg2, borderRadius: 12, padding: '10px 12px',
+      border: `1px solid ${COLORS.border}`, flex: 1, minWidth: 0,
+    }}>
+      <span style={{ fontSize: 9, color: COLORS.text2, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginTop: 4 }}>
+        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 20, fontWeight: 400, color: color || COLORS.text0, lineHeight: 1 }}>{value}</span>
+        <span style={{ fontSize: 10, color: COLORS.text2 }}>{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Signal bars ───────────────────────────────────────────────────────
+function SignalBars({ rssi }) {
+  const level = rssi > -55 ? 4 : rssi > -65 ? 3 : rssi > -75 ? 2 : rssi > -90 ? 1 : 0;
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 14 }}>
+      {[1,2,3,4].map(i => (
+        <div key={i} style={{
+          width: 3, height: 3 + i * 2.5, borderRadius: 1,
+          background: i <= level ? COLORS.teal : COLORS.border,
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// ── Alert Banner ──────────────────────────────────────────────────────
+function AlertBanner({ alerts }) {
+  if (!alerts.length) return null;
+  return (
+    <div style={{
+      background: `${COLORS.red}18`, border: `1px solid ${COLORS.red}44`,
+      borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8,
+    }}>
+      <div style={{ width: 6, height: 6, borderRadius: 50, background: COLORS.red, flexShrink: 0,
+        boxShadow: `0 0 8px ${COLORS.red}` }} />
+      <span style={{ fontSize: 11, color: COLORS.red, fontWeight: 500, lineHeight: 1.4 }}>
+        {alerts[0]}
+      </span>
+    </div>
+  );
+}
+
+// ── Connect Screen ────────────────────────────────────────────────────
+function ConnectScreen({ ble }) {
+  const { scanning, devices, startScan, stopScan, connect, errorMsg } = ble;
+
+  const toggleScan = () => (scanning ? stopScan() : startScan());
+
+  return (
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+      justifyContent: 'center', padding: '0 28px', gap: 18,
+    }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, position: 'relative', width: '100%' }}>
+        <div style={{
+          position: 'absolute', width: 240, height: 160, top: -20,
+          background: `radial-gradient(ellipse, ${COLORS.blue}1a 0%, transparent 70%)`,
+          pointerEvents: 'none',
+        }} />
+        <img src="logo_cagece_dark.png" alt="Cagece"
+          style={{ width: 200, height: 'auto', objectFit: 'contain', display: 'block', position: 'relative' }} />
+        <div style={{ width: '60%', height: 1, background: COLORS.border }} />
+        <img src="Cor_horiz1_fundo_escuro.png" alt="Governo do Ceará"
+          style={{ width: 150, height: 'auto', objectFit: 'contain', display: 'block', opacity: 0.9, position: 'relative' }} />
+        {scanning && (
+          <div style={{
+            position: 'absolute', inset: -24, borderRadius: 32,
+            border: `1.5px solid ${COLORS.blue}33`,
+            animation: 'pulse-ring 1.5s ease-out infinite',
+            pointerEvents: 'none',
+          }} />
+        )}
+      </div>
+
+      <div style={{
+        background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+        borderRadius: 99, padding: '5px 14px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+      }}>
+        <div style={{ width: 5, height: 5, borderRadius: 50, background: COLORS.teal }} />
+        <span style={{ fontSize: 11, fontWeight: 600, color: COLORS.text1, letterSpacing: '0.06em' }}>
+          FilterTrack · Monitor BLE
+        </span>
+      </div>
+
+      <div style={{ textAlign: 'center', minHeight: 30 }}>
+        <div style={{ fontSize: 12, color: COLORS.text2, lineHeight: 1.6 }}>
+          {scanning
+            ? 'Procurando dispositivos BLE próximos...'
+            : 'Conecte ao sensor ESP32 para monitorar o sistema de filtragem em tempo real.'}
+        </div>
+        {errorMsg && (
+          <div style={{ fontSize: 11, color: COLORS.red, marginTop: 6 }}>{errorMsg}</div>
+        )}
+      </div>
+
+      <button
+        onClick={toggleScan}
+        style={{
+          background: scanning ? 'transparent' : COLORS.blue,
+          border: `1.5px solid ${COLORS.blue}`,
+          color: scanning ? COLORS.blue : '#fff',
+          borderRadius: 12, padding: '12px 32px',
+          fontSize: 13, fontWeight: 600, letterSpacing: '0.04em',
+          cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+        }}
+      >
+        {scanning ? 'Cancelar Busca' : 'Iniciar Varredura BLE'}
+      </button>
+
+      {scanning && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxHeight: 200, overflowY: 'auto' }}>
+          {devices.length === 0 && (
+            <div style={{ textAlign: 'center', color: COLORS.text2, fontSize: 11, padding: 10 }}>
+              Nenhum dispositivo encontrado ainda...
+            </div>
+          )}
+          {devices.map(d => (
+            <div
+              key={d.address}
+              onClick={() => connect(d.address)}
+              style={{
+                background: COLORS.bg2, border: `1px solid ${COLORS.blue}44`,
+                borderRadius: 10, padding: '10px 14px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer',
+                animation: 'fade-in 0.3s ease both',
+              }}
+            >
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12, color: COLORS.text0, fontWeight: 500,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
+                <div style={{ fontSize: 10, color: COLORS.text2, marginTop: 2, fontFamily: COLORS.mono }}>
+                  {d.address} · RSSI {d.rssi} dBm
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: COLORS.blue, fontWeight: 600, marginLeft: 8 }}>Conectar</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <style>{`
+        @keyframes pulse-ring { 0%{transform:scale(1);opacity:.6} 100%{transform:scale(1.5);opacity:0} }
+        @keyframes fade-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────
+function Dashboard({ ble }) {
+  const { lastData, distanceHistory = [], rssi = -90, deviceName, deviceAddress, disconnect, sendCommand } = ble;
+  const distance = lastData?.distance;
+  const rxError = lastData?.error;
+
+  const alerts = [];
+  if (rxError) alerts.push(`Sensor: ${rxError}`);
+  if (Number.isFinite(distance) && distance > 80) alerts.push(`Distância elevada: ${fmtNum(distance, 1)} cm — verificar nível`);
+
+  // Derive a simple "fill" estimate from distance: closer = fuller. Range 5–100 cm.
+  const fillPct = Number.isFinite(distance)
+    ? clamp(Math.round(100 - ((distance - 5) / (100 - 5)) * 100), 0, 100)
+    : null;
+  const fillColor = fillPct == null ? COLORS.text2 : fillPct > 40 ? COLORS.teal : fillPct > 20 ? COLORS.amber : COLORS.red;
+
+  const lastUpdate = lastData?.ts
+    ? Math.round((Date.now() - lastData.ts) / 1000)
+    : null;
+
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: COLORS.bg0 }}>
+      <div style={{
+        background: COLORS.bg1, borderBottom: `1px solid ${COLORS.border}`,
+        padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.text0 }}>FilterTrack</div>
+          <div style={{ fontSize: 10, color: COLORS.teal, marginTop: 1, display: 'flex', alignItems: 'center', gap: 4,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ width: 5, height: 5, borderRadius: 50, background: COLORS.teal, boxShadow: `0 0 6px ${COLORS.teal}`, flexShrink: 0 }} />
+            {deviceName || deviceAddress || 'ESP32'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SignalBars rssi={rssi} />
+          <span style={{ fontFamily: COLORS.mono, fontSize: 10, color: COLORS.text2 }}>{rssi} dBm</span>
+          <button onClick={disconnect} style={{
+            background: 'transparent', border: `1px solid ${COLORS.border}`,
+            color: COLORS.text2, fontSize: 10, padding: '4px 8px', borderRadius: 6,
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>Desconectar</button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <AlertBanner alerts={alerts} />
+
+        <div style={{
+          background: COLORS.bg1, borderRadius: 16, padding: '14px 10px',
+          border: `1px solid ${COLORS.border}`,
+          display: 'flex', justifyContent: 'space-around', alignItems: 'flex-start',
+        }}>
+          <ArcGauge value={distance} min={0} max={100} label="Distância" unit="cm" color={COLORS.blue} size={108} warn={70} danger={90} />
+          <div style={{ width: 1, background: COLORS.border, alignSelf: 'stretch', margin: '8px 0' }} />
+          <ArcGauge value={fillPct == null ? NaN : fillPct} min={0} max={100} label="Nível est." unit="%" color={COLORS.teal} size={108} decimals={0} />
+        </div>
+
+        <div style={{ background: COLORS.bg2, borderRadius: 12, padding: '10px 14px', border: `1px solid ${COLORS.border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, alignItems: 'baseline' }}>
+            <span style={{ fontSize: 10, color: COLORS.text2, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Histórico de Distância</span>
+            <span style={{ fontFamily: COLORS.mono, fontSize: 11, color: COLORS.blue }}>últ. {distanceHistory.length} amostras</span>
+          </div>
+          <Sparkline data={distanceHistory} color={COLORS.blue} height={36} width={260} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <StatChip label="Última leitura"
+            value={Number.isFinite(distance) ? fmtNum(distance, 2) : '—'} unit="cm"
+            color={COLORS.blue} />
+          <StatChip label="Amostras"
+            value={distanceHistory.length} unit="" color={COLORS.teal} />
+          <StatChip label="Há"
+            value={lastUpdate == null ? '—' : lastUpdate} unit="s"
+            color={lastUpdate != null && lastUpdate > 6 ? COLORS.amber : COLORS.teal} />
+        </div>
+
+        <div style={{
+          background: COLORS.bg2, borderRadius: 12, padding: '12px 14px',
+          border: `1px solid ${COLORS.border}`,
+        }}>
+          <div style={{ fontSize: 10, color: COLORS.text2, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
+            Comandos
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <CmdButton label="Baixo consumo" onClick={() => sendCommand('1')} color={COLORS.amber} />
+            <CmdButton label="Normal" onClick={() => sendCommand('2')} color={COLORS.teal} />
+            <CmdButton label="Reiniciar" onClick={() => sendCommand('0')} color={COLORS.red} />
+          </div>
+        </div>
+
+        <div style={{ background: COLORS.bg2, borderRadius: 12, padding: '10px 14px', border: `1px solid ${COLORS.border}` }}>
+          <div style={{ fontSize: 10, color: COLORS.text2, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+            Stream BLE Raw
+          </div>
+          <div style={{ fontFamily: COLORS.mono, fontSize: 10, color: COLORS.teal, lineHeight: 1.7, opacity: 0.85,
+            maxHeight: 72, overflow: 'hidden', wordBreak: 'break-all' }}>
+            {lastData?.raw ? lastData.raw : '— aguardando notify —'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CmdButton({ label, onClick, color }) {
+  return (
+    <button onClick={onClick}
+      style={{
+        flex: 1, background: 'transparent', border: `1px solid ${color}66`,
+        color: color, padding: '8px 10px', borderRadius: 8,
+        fontFamily: 'inherit', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+        letterSpacing: '0.04em',
+      }}>
+      {label}
+    </button>
+  );
+}
+
+// ── Root App ──────────────────────────────────────────────────────────
+function App() {
+  const ble = useBLE();
+  const showDashboard = ble.connected;
+
+  return (
+    <div style={{ width: '100%', height: '100%', background: COLORS.bg0,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {showDashboard
+        ? <Dashboard ble={ble} />
+        : <ConnectScreen ble={ble} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
