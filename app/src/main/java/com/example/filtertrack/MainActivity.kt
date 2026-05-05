@@ -2,7 +2,10 @@ package com.example.filtertrack
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -21,11 +24,16 @@ class MainActivity : AppCompatActivity(),
     BLEManager.BLEListener,
     BLEManager.DataListener {
 
+    companion object {
+        const val EXTRA_STARTUP_ERROR = "startup_error"
+    }
+
     private lateinit var webView: WebView
     private lateinit var bleManager: BLEManager
 
     @Volatile private var pageReady = false
     private val pendingJs = ArrayDeque<String>()
+    private var pendingScanAfterBluetoothEnable = false
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -33,8 +41,21 @@ class MainActivity : AppCompatActivity(),
         if (permissions.values.all { it }) {
             bleManager.startScan()
         } else {
-            Toast.makeText(this, "Permissões BLE necessárias", Toast.LENGTH_SHORT).show()
-            push("onError", "Permissões BLE negadas")
+            Toast.makeText(this, "Permissoes BLE necessarias", Toast.LENGTH_SHORT).show()
+            push("onError", "Permissoes BLE negadas")
+        }
+    }
+
+    private val enableBluetoothLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        val enabled = bleManager.isBluetoothEnabled()
+        if (enabled && pendingScanAfterBluetoothEnable) {
+            pendingScanAfterBluetoothEnable = false
+            checkPermissionsAndScan()
+        } else {
+            pendingScanAfterBluetoothEnable = false
+            push("onError", "Ative o Bluetooth para procurar dispositivos")
         }
     }
 
@@ -50,7 +71,25 @@ class MainActivity : AppCompatActivity(),
         bleManager.dataListener = this
 
         webView = findViewById(R.id.webView)
+        findViewById<View>(R.id.biButton).setOnClickListener {
+            startActivity(Intent(this, BiDashboardActivity::class.java))
+        }
         setupWebView()
+        showStartupErrorIfAny(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("reset_to_initial_screen", false)) {
+            bleManager.stopScan()
+            bleManager.disconnect()
+            pageReady = false
+            pendingJs.clear()
+            webView.loadUrl("file:///android_asset/index.html")
+            intent.removeExtra("reset_to_initial_screen")
+        }
+        showStartupErrorIfAny(intent)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -101,6 +140,11 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun checkPermissionsAndScan() {
+        if (!bleManager.isBluetoothEnabled()) {
+            promptEnableBluetoothForRetry()
+            return
+        }
+
         val needed = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             needed.add(Manifest.permission.BLUETOOTH_SCAN)
@@ -115,7 +159,30 @@ class MainActivity : AppCompatActivity(),
         else requestPermissionLauncher.launch(missing.toTypedArray())
     }
 
-    // ── Push events from Kotlin → JS ──
+    private fun promptEnableBluetoothForRetry() {
+        if (isFinishing || isDestroyed) return
+        AlertDialog.Builder(this)
+            .setTitle("Bluetooth desligado")
+            .setMessage("Ative o Bluetooth para procurar dispositivos e tentar novamente.")
+            .setNegativeButton("Cancelar") { dialog, _ ->
+                pendingScanAfterBluetoothEnable = false
+                dialog.dismiss()
+                push("onError", "Ative o Bluetooth para procurar dispositivos")
+            }
+            .setPositiveButton("Ativar") { _, _ ->
+                pendingScanAfterBluetoothEnable = true
+                enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+            }
+            .show()
+    }
+
+    private fun showStartupErrorIfAny(intent: Intent?) {
+        val message = intent?.getStringExtra(EXTRA_STARTUP_ERROR)?.trim().orEmpty()
+        if (message.isEmpty()) return
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        intent?.removeExtra(EXTRA_STARTUP_ERROR)
+    }
+
     private fun push(method: String, vararg args: Any?) {
         val jsArgs = args.joinToString(",") { toJsLiteral(it) }
         val js = "window.FilterTrackBridge && window.FilterTrackBridge.$method($jsArgs);"
@@ -143,7 +210,6 @@ class MainActivity : AppCompatActivity(),
             .replace("\r", "\\r") + "\""
     }
 
-    // ── BLEManager.BLEListener ──
     @SuppressLint("MissingPermission")
     override fun onDeviceFound(device: BluetoothDevice, rssi: Int) {
         val name = try { device.name } catch (_: SecurityException) { null } ?: "Desconhecido"
@@ -166,7 +232,6 @@ class MainActivity : AppCompatActivity(),
         push("onError", message)
     }
 
-    // ── BLEManager.DataListener ──
     override fun onDataReceived(data: String) {
         push("onDataReceived", data)
     }
@@ -175,7 +240,10 @@ class MainActivity : AppCompatActivity(),
         super.onDestroy()
         if (bleManager.bleListener === this) bleManager.bleListener = null
         if (bleManager.dataListener === this) bleManager.dataListener = null
-        try { webView.destroy() } catch (_: Throwable) {}
+        try {
+            webView.destroy()
+        } catch (_: Throwable) {
+        }
     }
 
     override fun onBackPressed() {

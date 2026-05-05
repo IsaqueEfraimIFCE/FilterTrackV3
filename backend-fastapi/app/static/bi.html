@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FilterTrack BI — Cagece</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #f4f4f4; color: #161616; font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif; font-size: 14px; line-height: 1.4; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  button { cursor: pointer; background: none; border: none; font: inherit; color: inherit; }
+  input, select, textarea { font: inherit; }
+  :focus-visible { outline: 2px solid #0f62fe; outline-offset: 1px; }
+  .ft-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .ft-scroll table { min-width: 640px; }
+  .ft-bnav { scrollbar-width: none; }
+  .ft-bnav::-webkit-scrollbar { display: none; }
+  @media (max-width: 760px) { html, body { font-size: 13px; } }
+</style>
+</head>
+<body>
+<div id="app-root"></div>
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+const T = {
+  blue: "#0068B4", blueHover: "#0058a0", blue10: "#e6f0f9",
+  teal: "#009ca6",
+  ink: "#161616", inkMuted: "#525252", inkSubtle: "#6f6f6f", inkTertiary: "#a8a8a8",
+  canvas: "#ffffff", surface1: "#f4f4f4", surface2: "#e8e8e8",
+  hairline: "#e0e0e0", hairlineStrong: "#8d8d8d",
+  success: "#198038", warning: "#b28600", danger: "#da1e28",
+  mono: '"IBM Plex Mono", monospace',
+};
+
+const IN = { height: 40, padding: "0 10px", border: `1px solid ${T.hairline}`, background: T.surface1, fontSize: 14, outline: "none", width: "100%", color: T.ink };
+
+const LayoutCtx = React.createContext({ isMobile: false, isNarrow: false });
+function useLayout() { return React.useContext(LayoutCtx); }
+
+function useMediaQuery(q) {
+  const get = () => typeof window !== "undefined" && window.matchMedia(q).matches;
+  const [m, setM] = useState(get);
+  useEffect(() => {
+    const media = window.matchMedia(q);
+    const upd = () => setM(media.matches);
+    upd(); media.addEventListener("change", upd);
+    return () => media.removeEventListener("change", upd);
+  }, [q]);
+  return m;
+}
+
+const fmtN = new Intl.NumberFormat("pt-BR");
+
+function shortDate(v) {
+  if (!v) return "";
+  try { return new Date(v).toLocaleString("pt-BR"); } catch(_) { return v; }
+}
+function numOrNull(v) {
+  const n = Number(String(v || "").replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+/* ── Primitives ── */
+
+function CageceMark({ size = 24 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
+      <rect width="40" height="40" fill={T.blue}/>
+      <path d="M20 8 C 14 18, 11 24, 11 28 a 9 9 0 0 0 18 0 c 0 -4 -3 -10 -9 -20 z" fill="#fff"/>
+    </svg>
+  );
+}
+
+function Btn({ kind = "primary", size = "md", children, onClick, disabled, full, type, icon }) {
+  const h = size === "sm" ? 32 : size === "lg" ? 48 : 40;
+  const styles = {
+    primary:  { background: T.blue,      color: "#fff",       border: `1px solid ${T.blue}` },
+    tertiary: { background: "transparent", color: T.blue,     border: `1px solid ${T.blue}` },
+    ghost:    { background: "transparent", color: T.blue,     border: "1px solid transparent" },
+    danger:   { background: T.danger,    color: "#fff",       border: `1px solid ${T.danger}` },
+    secondary:{ background: T.ink,       color: "#fff",       border: `1px solid ${T.ink}` },
+  };
+  const s = styles[kind] ?? styles.primary;
+  return (
+    <button type={type || "button"} disabled={disabled} onClick={onClick}
+      style={{ ...s, height: h, padding: "0 16px", fontSize: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+        width: full ? "100%" : "auto", transition: "background 70ms", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, whiteSpace: "nowrap" }}
+      onMouseEnter={e => { if (disabled) return; if (kind === "primary") e.currentTarget.style.background = T.blueHover; else if (kind === "ghost" || kind === "tertiary") e.currentTarget.style.background = T.blue10; }}
+      onMouseLeave={e => { e.currentTarget.style.background = s.background || "transparent"; }}>
+      {icon}{children}
+    </button>
+  );
+}
+
+function Tag({ tone = "neutral", children }) {
+  const tones = { neutral: ["#e0e0e0", T.ink], blue: [T.blue10, T.blue], success: ["#a7f0ba", "#044317"], warning: ["#fcf4d6", "#684e00"], danger: ["#ffd7d9", "#750e13"] };
+  const [bg, fg] = tones[tone] ?? tones.neutral;
+  return <span style={{ display: "inline-flex", alignItems: "center", height: 20, padding: "0 8px", background: bg, color: fg, fontSize: 12, fontWeight: 500, letterSpacing: 0.32, whiteSpace: "nowrap" }}>{children}</span>;
+}
+
+function Tile({ children, padding = 16, style }) {
+  return <div style={{ background: T.canvas, border: `1px solid ${T.hairline}`, padding, ...style }}>{children}</div>;
+}
+
+function Th({ children, align = "left" }) {
+  return <th style={{ textAlign: align, padding: "10px 16px", fontWeight: 500, fontSize: 12, letterSpacing: 0.32, color: T.inkMuted, textTransform: "uppercase", background: T.surface1, borderBottom: `1px solid ${T.hairline}`, whiteSpace: "nowrap" }}>{children}</th>;
+}
+function Td({ children, align = "left" }) {
+  return <td style={{ textAlign: align, padding: "10px 16px", verticalAlign: "top", borderBottom: `1px solid ${T.hairline}` }}>{children}</td>;
+}
+
+function StatusTag({ status }) {
+  const tone = { pending: "warning", approved: "success", rejected: "danger" }[status] || "neutral";
+  const label = { pending: "Pendente", approved: "Aprovado", rejected: "Rejeitado" }[status] || status;
+  return <Tag tone={tone}>{label}</Tag>;
+}
+
+function Field({ label, children }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/* ── Header ── */
+
+function Header({ role, onLogout }) {
+  const { isMobile } = useLayout();
+  return (
+    <header style={{ height: 48, background: T.ink, color: "#fff", display: "flex", alignItems: "center", paddingRight: 16, position: "sticky", top: 0, zIndex: 50, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", flex: 1 }}>
+        <CageceMark size={20} />
+        <span style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" }}>FilterTrack</span>
+        {!isMobile && <span style={{ fontSize: 14, fontWeight: 300, color: "#a8a8a8" }}>BI · Cagece</span>}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {role && !isMobile && <span style={{ fontSize: 12, color: "#a8a8a8", fontFamily: T.mono }}>{role}</span>}
+        <button onClick={onLogout} style={{ height: 32, padding: "0 12px", background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 13 }}>Sair</button>
+      </div>
+    </header>
+  );
+}
+
+/* ── Sidebar ── */
+
+const NAV = [
+  { id: "overview",  label: "Visão geral", icon: "M3 11l7-6 7 6v7a1 1 0 01-1 1h-4v-5H8v5H4a1 1 0 01-1-1z" },
+  { id: "filters",   label: "Filtros",     icon: "M3 4h14l-5 6v6l-4 1V10z" },
+  { id: "sessions",  label: "Sessões",     icon: "M3 5h14M3 10h14M3 15h10" },
+  { id: "proposals", label: "Propostas",   icon: "M5 3h7l3 3v11H5z M12 3v3h3" },
+  { id: "settings",  label: "Ajustes",     icon: "M10 7a3 3 0 100 6 3 3 0 000-6zm0-4v2m0 10v2M3 10h2m10 0h2" },
+];
+
+function Sidebar({ view, onChange, role }) {
+  const { isMobile } = useLayout();
+  if (isMobile) {
+    return (
+      <aside className="ft-bnav" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60, height: 56, background: T.canvas, borderTop: `1px solid ${T.hairline}`, overflowX: "auto", overflowY: "hidden" }}>
+        <nav style={{ display: "flex", minWidth: NAV.length * 68 }}>
+          {NAV.map(n => (
+            <button key={n.id} onClick={() => onChange(n.id)} style={{ width: 68, height: 55, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, background: view === n.id ? T.surface1 : "transparent", borderTop: view === n.id ? `3px solid ${T.blue}` : "3px solid transparent", color: view === n.id ? T.ink : T.inkMuted, fontSize: 10, flexShrink: 0 }}>
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d={n.icon} stroke="currentColor" strokeWidth="1.4"/></svg>
+              <span style={{ maxWidth: 64, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.label}</span>
+            </button>
+          ))}
+        </nav>
+      </aside>
+    );
+  }
+  return (
+    <aside style={{ width: 220, flexShrink: 0, background: T.canvas, borderRight: `1px solid ${T.hairline}`, display: "flex", flexDirection: "column", position: "sticky", top: 48, height: "calc(100vh - 48px)", overflowY: "auto" }}>
+      <nav style={{ padding: "8px 0" }}>
+        {NAV.map(n => (
+          <button key={n.id} onClick={() => onChange(n.id)}
+            style={{ width: "100%", height: 40, display: "flex", alignItems: "center", gap: 12, padding: "0 16px", background: view === n.id ? T.surface1 : "transparent", borderLeft: view === n.id ? `3px solid ${T.blue}` : "3px solid transparent", fontWeight: view === n.id ? 500 : 400, fontSize: 14, color: view === n.id ? T.ink : T.inkMuted, transition: "background 70ms" }}
+            onMouseEnter={e => { if (view !== n.id) e.currentTarget.style.background = T.surface1; }}
+            onMouseLeave={e => { if (view !== n.id) e.currentTarget.style.background = "transparent"; }}>
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d={n.icon} stroke="currentColor" strokeWidth="1.4"/></svg>
+            <span>{n.label}</span>
+          </button>
+        ))}
+      </nav>
+      <div style={{ flex: 1 }} />
+      {role && <div style={{ padding: 16, borderTop: `1px solid ${T.hairline}`, fontSize: 12, color: T.inkSubtle }}><span style={{ fontFamily: T.mono, color: T.blue }}>{role}</span></div>}
+    </aside>
+  );
+}
+
+function PageHeader({ crumbs, title, actions }) {
+  const { isMobile } = useLayout();
+  return (
+    <div style={{ background: T.canvas, borderBottom: `1px solid ${T.hairline}`, padding: isMobile ? "14px 16px" : "16px 24px" }}>
+      <div style={{ fontSize: 12, color: T.inkSubtle, letterSpacing: 0.32, marginBottom: 4 }}>
+        {crumbs.map((c, i) => <span key={i}><span style={{ color: i === crumbs.length - 1 ? T.inkSubtle : T.blue }}>{c}</span>{i < crumbs.length - 1 && <span style={{ margin: "0 8px", color: T.inkTertiary }}>/</span>}</span>)}
+      </div>
+      <div style={{ display: "flex", alignItems: isMobile ? "stretch" : "flex-end", justifyContent: "space-between", gap: 12, flexDirection: isMobile ? "column" : "row" }}>
+        <h1 style={{ fontSize: isMobile ? 22 : 26, fontWeight: 300, lineHeight: 1.2 }}>{title}</h1>
+        {actions && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{actions}</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ── Charts ── */
+
+function KpiTile({ label, value, unit, sub }) {
+  const { isMobile } = useLayout();
+  return (
+    <Tile padding={isMobile ? 14 : 16} style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: isMobile ? 96 : 108 }}>
+      <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontFamily: T.mono, fontSize: isMobile ? 26 : 32, fontWeight: 300, lineHeight: 1 }}>{value}</span>
+        {unit && <span style={{ fontSize: 12, color: T.inkSubtle }}>{unit}</span>}
+      </div>
+      {sub && <div style={{ fontSize: 12, color: T.inkSubtle, marginTop: "auto" }}>{sub}</div>}
+    </Tile>
+  );
+}
+
+function LineChart({ data = [], height = 220, xKey = "date", yKey = "samples", y2Key, color = T.blue, color2 = T.teal }) {
+  const w = 800, pl = 48, pr = 16, pt = 16, pb = 32;
+  const cw = w - pl - pr, ch = height - pt - pb;
+  const vals = data.flatMap(d => [Number(d[yKey]) || 0, y2Key ? (Number(d[y2Key]) || 0) : 0]);
+  const vMax = Math.max(...vals, 1) * 1.1;
+  const xi = i => data.length <= 1 ? pl + cw / 2 : pl + (i / (data.length - 1)) * cw;
+  const yi = v => pt + (1 - v / vMax) * ch;
+  const step = Math.max(1, Math.ceil(data.length / 10));
+  function line(key, col) {
+    const pts = data.map((d, i) => `${i === 0 ? "M" : "L"}${xi(i)},${yi(Number(d[key]) || 0)}`).join(" ");
+    return <>
+      <path d={`${pts} L${xi(data.length - 1)},${pt + ch} L${xi(0)},${pt + ch} Z`} fill={col} fillOpacity="0.07" />
+      <path d={pts} fill="none" stroke={col} strokeWidth="1.6" />
+      {data.map((d, i) => <circle key={i} cx={xi(i)} cy={yi(Number(d[key]) || 0)} r="2.5" fill={T.canvas} stroke={col} strokeWidth="1.4" />)}
+    </>;
+  }
+  return (
+    <svg viewBox={`0 0 ${w} ${height}`} style={{ width: "100%", height: "auto", display: "block" }}>
+      {[0,1,2,3,4].map(i => { const yy = pt + (i / 4) * ch; return <g key={i}><line x1={pl} x2={w - pr} y1={yy} y2={yy} stroke={T.hairline} /><text x={pl - 8} y={yy + 4} fontSize="11" fontFamily="IBM Plex Mono" fill={T.inkSubtle} textAnchor="end">{Math.round(vMax * (1 - i / 4)).toLocaleString()}</text></g>; })}
+      {line(yKey, color)}
+      {y2Key && line(y2Key, color2)}
+      {data.map((d, i) => i % step === 0 ? <text key={i} x={xi(i)} y={height - 8} fontSize="11" fontFamily="IBM Plex Mono" fill={T.inkSubtle} textAnchor="middle">{String(d[xKey] || "").slice(5)}</text> : null)}
+    </svg>
+  );
+}
+
+function BarChart({ data = [], height = 200, labelKey = "label", valueKey = "value", color = T.blue }) {
+  const w = 800, lw = 180, rp = 90;
+  const rows = Math.max(data.length, 1);
+  const cw = w - lw - rp;
+  const rowH = (height - 16) / rows;
+  const max = Math.max(...data.map(d => Number(d[valueKey]) || 0), 1);
+  return (
+    <svg viewBox={`0 0 ${w} ${height}`} style={{ width: "100%", height: "auto", display: "block" }}>
+      {data.map((d, i) => {
+        const yy = 8 + i * rowH;
+        const bw = (Number(d[valueKey]) || 0) / max * cw;
+        return <g key={i}>
+          <text x={lw - 10} y={yy + rowH / 2 + 4} fontSize="12" fill={T.ink} textAnchor="end">{String(d[labelKey] || "").slice(0, 24)}</text>
+          <rect x={lw} y={yy + rowH * 0.2} width={bw} height={rowH * 0.6} fill={color} />
+          <text x={lw + bw + 8} y={yy + rowH / 2 + 4} fontSize="11" fontFamily="IBM Plex Mono" fill={T.inkSubtle}>{(Number(d[valueKey]) || 0).toLocaleString()}</text>
+        </g>;
+      })}
+    </svg>
+  );
+}
+
+function Donut({ value = 0 }) {
+  const r = 56, c = 2 * Math.PI * r;
+  return (
+    <svg width="130" height="130" viewBox="0 0 130 130" style={{ display: "block" }}>
+      <circle cx="65" cy="65" r={r} fill="none" stroke={T.surface2} strokeWidth="12" />
+      <circle cx="65" cy="65" r={r} fill="none" stroke={T.blue} strokeWidth="12" strokeDasharray={`${c * value} ${c}`} strokeDashoffset={c * 0.25} transform="rotate(-90 65 65)" />
+      <text x="65" y="63" textAnchor="middle" fontSize="26" fontFamily="IBM Plex Mono" fontWeight="300" fill={T.ink}>{Math.round(value * 100)}%</text>
+      <text x="65" y="79" textAnchor="middle" fontSize="10" fontFamily="IBM Plex Sans" fill={T.inkSubtle} letterSpacing="0.5">QUALIDADE</text>
+    </svg>
+  );
+}
+
+/* ── FilterBar ── */
+
+function FilterBar({ params, setParams, onApply, devices = [], regFilters = [] }) {
+  const { isMobile } = useLayout();
+  const selStyle = { height: 34, padding: "0 8px", border: `1px solid ${T.hairline}`, background: T.surface1, fontSize: 13, outline: "none", color: T.ink };
+  return (
+    <div style={{ display: "flex", gap: 8, padding: isMobile ? "10px 16px" : "10px 24px", background: T.canvas, borderBottom: `1px solid ${T.hairline}`, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <FG label="De"><input type="datetime-local" value={params.from} onChange={e => setParams(p => ({ ...p, from: e.target.value }))} style={{ ...selStyle, fontFamily: T.mono, minWidth: 180 }} /></FG>
+      <FG label="Até"><input type="datetime-local" value={params.to} onChange={e => setParams(p => ({ ...p, to: e.target.value }))} style={{ ...selStyle, fontFamily: T.mono, minWidth: 180 }} /></FG>
+      <FG label="Dispositivo">
+        <select value={params.deviceAddress} onChange={e => setParams(p => ({ ...p, deviceAddress: e.target.value }))} style={{ ...selStyle, minWidth: 160 }}>
+          <option value="">Todos</option>
+          {devices.map(d => <option key={d.address} value={d.address}>{d.name || d.address}</option>)}
+        </select>
+      </FG>
+      <FG label="Filtro">
+        <select value={params.filterId} onChange={e => setParams(p => ({ ...p, filterId: e.target.value }))} style={{ ...selStyle, minWidth: 200 }}>
+          <option value="">Todos</option>
+          {regFilters.filter(f => !f.archived).map(f => <option key={f.id} value={f.id}>{f.name || f.id}</option>)}
+        </select>
+      </FG>
+      <Btn kind="primary" size="sm" onClick={onApply}>Aplicar</Btn>
+    </div>
+  );
+}
+function FG({ label, children }) {
+  return <div style={{ display: "flex", flexDirection: "column", gap: 3 }}><span style={{ fontSize: 11, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>{label}</span>{children}</div>;
+}
+
+/* ── Overview ── */
+
+function OverviewPage({ overview, registeredFilters, params, setParams, onApply }) {
+  const { isMobile, isNarrow } = useLayout();
+  const summary = overview?.summary || {};
+  const flow = summary.flow || {};
+  const quality = summary.quality || {};
+  const series = overview?.series || [];
+  const stations = overview?.stations || [];
+  const sessions = overview?.latestSessions || [];
+  const devices = overview?.devices || [];
+  const active = (registeredFilters || []).filter(f => !f.archived).length;
+  const withData = (registeredFilters || []).filter(f => (f.samples || 0) > 0).length;
+  return (
+    <>
+      <PageHeader crumbs={["Cagece", "FilterTrack BI", "Visão geral"]} title="Visão geral"
+        actions={<Btn kind="ghost" size="md" onClick={onApply}>Atualizar</Btn>} />
+      <FilterBar params={params} setParams={setParams} onApply={onApply} devices={devices} regFilters={registeredFilters} />
+      <div style={{ padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : isNarrow ? "repeat(3,1fr)" : "repeat(5,1fr)", gap: 1, background: T.hairline }}>
+          <KpiTile label="Sessões" value={summary.totalSessions ?? 0} sub={`${summary.uniqueDevices ?? 0} dispositivos`} />
+          <KpiTile label="Amostras" value={(summary.totalSamples ?? 0).toLocaleString()} sub={`Média ${(summary.avgSamplesPerSession || 0).toFixed(0)} / sessão`} />
+          <KpiTile label="Filtros ativos" value={`${withData}/${active}`} sub="com dados" />
+          <KpiTile label="Vazão média" value={(flow.avgFlowLpm || 0).toFixed(2)} unit="L/min" />
+          <KpiTile label="Sem fluxo" value={quality.sessionsWithoutFlow ?? 0} sub="sessões" />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: isNarrow ? "1fr" : "2fr 1fr", gap: 16 }}>
+          <Tile padding={0}>
+            <div style={{ padding: "16px 16px 8px" }}>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Série temporal</div>
+              <div style={{ fontSize: 12, color: T.inkSubtle }}>amostras (azul) · sessões (verde)</div>
+            </div>
+            <div style={{ padding: "0 8px 8px" }}><LineChart data={series} xKey="date" yKey="samples" y2Key="sessions" /></div>
+          </Tile>
+          <Tile padding={0}>
+            <div style={{ padding: "16px 16px 8px" }}>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Qualidade</div>
+              <div style={{ fontSize: 12, color: T.inkSubtle }}>cobertura de dados</div>
+            </div>
+            <div style={{ padding: 16, display: "flex", justifyContent: "center" }}>
+              <Donut value={quality.coverageRate || 0} />
+            </div>
+          </Tile>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr", gap: 16 }}>
+          <Tile padding={0}>
+            <div style={{ padding: "16px 16px 8px" }}>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Top estações</div>
+            </div>
+            <div style={{ padding: "0 8px 8px" }}>
+              <BarChart data={stations.map(s => ({ label: s.station, value: s.samples }))} height={Math.max(120, stations.length * 30)} />
+            </div>
+          </Tile>
+          <Tile padding={0}>
+            <div style={{ padding: "16px 16px 8px" }}>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Sessões recentes</div>
+            </div>
+            <div className="ft-scroll">
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr><Th>Sessão</Th><Th>Filtro</Th><Th align="right">Vazão</Th><Th align="right">Amostras</Th></tr></thead>
+              <tbody>{sessions.slice(0, 7).map((r, i) => (
+                <tr key={i}>
+                  <Td><span style={{ fontFamily: T.mono, color: T.blue, fontSize: 12 }}>{r.sessionId}</span><div style={{ fontSize: 11, color: T.inkSubtle }}>{shortDate(r.startedAt || r.receivedAt)}</div></Td>
+                  <Td>{r.filter?.name || ""}<div style={{ fontSize: 11, color: T.inkSubtle }}>{r.filter?.station || ""}</div></Td>
+                  <Td align="right">{r.flow?.available ? <span style={{ fontFamily: T.mono }}>{Number(r.flow.flowLpm).toFixed(2)}<span style={{ color: T.inkSubtle, fontSize: 11 }}> L/min</span></span> : <span style={{ color: T.inkSubtle }}>—</span>}</Td>
+                  <Td align="right"><span style={{ fontFamily: T.mono }}>{(r.sampleCount || 0).toLocaleString()}</span></Td>
+                </tr>
+              ))}</tbody>
+            </table>
+            </div>
+          </Tile>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Filters page ── */
+
+function FiltersPage({ registeredFilters = [], api, onReload }) {
+  const [q, setQ] = useState("");
+  const [inclArchived, setInclArchived] = useState(true);
+  const [editing, setEditing] = useState(null);
+  const [ef, setEf] = useState({});
+  const [submittedBy, setSubmittedBy] = useState("");
+  const [msg, setMsg] = useState({ kind: "", text: "" });
+  const { isMobile } = useLayout();
+
+  const rows = useMemo(() => {
+    let r = inclArchived ? registeredFilters : registeredFilters.filter(f => !f.archived);
+    if (q.trim()) { const Q = q.toLowerCase(); r = r.filter(f => [(f.name||""),(f.station||""),(f.businessUnit||"")].some(s => s.toLowerCase().includes(Q))); }
+    return r;
+  }, [registeredFilters, q, inclArchived]);
+
+  function openEdit(row) {
+    setEditing(row);
+    setEf({ name: row.name || "", areaM2: row.areaM2 ?? "", station: row.station || "", location: row.location || "", businessUnit: row.businessUnit || "", retroactive: true });
+    setMsg({ kind: "", text: "" });
+  }
+
+  async function submitEdit() {
+    if (!editing) return;
+    setMsg({ kind: "", text: "" });
+    try {
+      await api("/filtertrack/bi/proposals", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "filter_edit", targetFilterId: editing.id, submittedBy: submittedBy.trim(), payload: { changes: { name: ef.name.trim(), areaM2: numOrNull(ef.areaM2), station: ef.station.trim(), location: ef.location.trim(), businessUnit: ef.businessUnit.trim() }, retroactive: ef.retroactive } }),
+      });
+      setMsg({ kind: "ok", text: "Proposta enviada." });
+      onReload();
+    } catch(e) { setMsg({ kind: "err", text: e.message }); }
+  }
+
+  async function proposeArchive(id, archived) {
+    try {
+      await api("/filtertrack/bi/proposals", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "filter_archive", targetFilterId: id, submittedBy: submittedBy.trim(), payload: { archived } }),
+      });
+      onReload();
+    } catch(e) { alert(e.message); }
+  }
+
+  return (
+    <>
+      <PageHeader crumbs={["Cagece", "FilterTrack BI", "Filtros"]} title="Filtros registrados" />
+      <div style={{ padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
+        <Tile padding={0}>
+          <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${T.hairline}`, minHeight: 48, flexWrap: "wrap" }}>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar nome, estação, UN…"
+              style={{ flex: 1, height: 48, padding: "0 16px", border: "none", outline: "none", fontSize: 14, background: "transparent", minWidth: 160 }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 16px", fontSize: 13, color: T.inkMuted, cursor: "pointer", whiteSpace: "nowrap" }}>
+              <input type="checkbox" checked={inclArchived} onChange={e => setInclArchived(e.target.checked)} style={{ margin: 0 }} /> Arquivados
+            </label>
+          </div>
+          <div className="ft-scroll">
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr><Th>Filtro</Th><Th>Estação</Th><Th>Local</Th><Th align="right">Área m²</Th><Th align="right">Sessões</Th><Th align="right">Amostras</Th><Th>Status</Th><Th>Ações</Th></tr></thead>
+            <tbody>{rows.map(f => (
+              <tr key={f.id} style={{ background: editing?.id === f.id ? T.blue10 : "transparent" }}>
+                <Td><b style={{ fontWeight: 500 }}>{f.name || ""}</b><div style={{ fontFamily: T.mono, fontSize: 11, color: T.inkSubtle }}>{f.id}</div></Td>
+                <Td>{f.station || ""}</Td>
+                <Td>{f.location || ""}<div style={{ fontSize: 11, color: T.inkSubtle }}>{f.businessUnit || ""}</div></Td>
+                <Td align="right"><span style={{ fontFamily: T.mono }}>{f.areaM2 == null ? "—" : f.areaM2}</span></Td>
+                <Td align="right"><span style={{ fontFamily: T.mono }}>{fmtN.format(f.sessions || 0)}</span></Td>
+                <Td align="right"><span style={{ fontFamily: T.mono }}>{fmtN.format(f.samples || 0)}</span></Td>
+                <Td><Tag tone={f.archived ? "danger" : "success"}>{f.archived ? "Arquivado" : "Ativo"}</Tag></Td>
+                <Td><div style={{ display: "flex", gap: 4 }}>
+                  <Btn kind="ghost" size="sm" onClick={() => openEdit(f)}>Editar</Btn>
+                  <Btn kind={f.archived ? "ghost" : "danger"} size="sm" onClick={() => proposeArchive(f.id, !f.archived)}>{f.archived ? "Reativar" : "Arquivar"}</Btn>
+                </div></Td>
+              </tr>
+            ))}</tbody>
+          </table>
+          </div>
+          <div style={{ padding: "8px 16px", borderTop: `1px solid ${T.hairline}`, fontSize: 12, color: T.inkMuted }}>{rows.length} de {registeredFilters.length}</div>
+        </Tile>
+        {editing && (
+          <Tile padding={isMobile ? 16 : 20}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div><div style={{ fontSize: 15, fontWeight: 500 }}>Editar filtro</div><div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle }}>{editing.id}</div></div>
+              <Btn kind="ghost" size="sm" onClick={() => setEditing(null)}>Fechar</Btn>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+              <Field label="Nome"><input value={ef.name} onChange={e => setEf(f => ({ ...f, name: e.target.value }))} style={IN} /></Field>
+              <Field label="Área m²"><input type="number" value={ef.areaM2} onChange={e => setEf(f => ({ ...f, areaM2: e.target.value }))} style={IN} /></Field>
+              <Field label="Estação"><input value={ef.station} onChange={e => setEf(f => ({ ...f, station: e.target.value }))} style={IN} /></Field>
+              <Field label="Local"><input value={ef.location} onChange={e => setEf(f => ({ ...f, location: e.target.value }))} style={IN} /></Field>
+              <Field label="Unidade"><input value={ef.businessUnit} onChange={e => setEf(f => ({ ...f, businessUnit: e.target.value }))} style={IN} /></Field>
+              <Field label="Enviado por"><input value={submittedBy} onChange={e => setSubmittedBy(e.target.value)} style={IN} /></Field>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" checked={ef.retroactive} onChange={e => setEf(f => ({ ...f, retroactive: e.target.checked }))} />
+              Aplicar nas sessões já gravadas com esse filtro
+            </label>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+              <Btn kind="primary" onClick={submitEdit}>Enviar proposta</Btn>
+              {msg.text && <span style={{ fontSize: 13, color: msg.kind === "ok" ? T.success : T.danger }}>{msg.text}</span>}
+            </div>
+          </Tile>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ── Sessions page ── */
+
+function SessionsPage({ overview, api, onReload }) {
+  const sessions = overview?.latestSessions || [];
+  const [form, setForm] = useState({ sessionId: "", deviceName: "", deviceAddress: "", filterId: "", filterName: "", filterArea: "", filterStation: "", filterLocation: "", filterUnit: "", submittedBy: "" });
+  const [msg, setMsg] = useState({ kind: "", text: "" });
+  const { isMobile } = useLayout();
+
+  function fill(r) {
+    setForm(f => ({ ...f, sessionId: r.sessionId || "", deviceName: r.device?.name || "", deviceAddress: r.device?.address || "", filterId: r.filter?.id || "", filterName: r.filter?.name || "", filterArea: r.filter?.areaM2 ?? "", filterStation: r.filter?.station || "", filterLocation: r.filter?.location || "", filterUnit: r.filter?.businessUnit || "" }));
+    setMsg({ kind: "", text: "" });
+  }
+
+  async function submit() {
+    setMsg({ kind: "", text: "" });
+    try {
+      await api("/filtertrack/bi/proposals", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "session_edit", targetSessionRef: form.sessionId.trim(), submittedBy: form.submittedBy.trim(), payload: { device: { name: form.deviceName.trim(), address: form.deviceAddress.trim() }, filter: { id: form.filterId.trim(), name: form.filterName.trim(), areaM2: numOrNull(form.filterArea), station: form.filterStation.trim(), location: form.filterLocation.trim(), businessUnit: form.filterUnit.trim() } } }),
+      });
+      setMsg({ kind: "ok", text: "Proposta enviada." });
+      onReload();
+    } catch(e) { setMsg({ kind: "err", text: e.message }); }
+  }
+
+  return (
+    <>
+      <PageHeader crumbs={["Cagece", "FilterTrack BI", "Sessões"]} title="Sessões" />
+      <div style={{ padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
+        <Tile padding={0}>
+          <div className="ft-scroll">
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr><Th>Sessão</Th><Th>Dispositivo</Th><Th>Filtro</Th><Th>Início</Th><Th align="right">Amostras</Th><Th>Fluxo</Th><Th></Th></tr></thead>
+            <tbody>{sessions.map((r, i) => (
+              <tr key={i}>
+                <Td><span style={{ fontFamily: T.mono, color: T.blue, fontSize: 12 }}>{r.sessionId}</span></Td>
+                <Td>{r.device?.name || ""}<div style={{ fontFamily: T.mono, fontSize: 11, color: T.inkSubtle }}>{r.device?.address || ""}</div></Td>
+                <Td>{r.filter?.name || ""}<div style={{ fontSize: 11, color: T.inkSubtle }}>{r.filter?.station || ""}</div></Td>
+                <Td><span style={{ fontSize: 12 }}>{shortDate(r.startedAt || r.receivedAt)}</span></Td>
+                <Td align="right"><span style={{ fontFamily: T.mono }}>{(r.sampleCount || 0).toLocaleString()}</span></Td>
+                <Td>{r.flow?.available ? <><span style={{ fontFamily: T.mono }}>{Number(r.flow.flowLpm).toFixed(2)}</span><span style={{ color: T.inkSubtle }}> L/min</span></> : <span style={{ color: T.inkSubtle }}>—</span>}</Td>
+                <Td><Btn kind="ghost" size="sm" onClick={() => fill(r)}>Editar</Btn></Td>
+              </tr>
+            ))}</tbody>
+          </table>
+          </div>
+        </Tile>
+        <Tile padding={isMobile ? 16 : 20}>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 14 }}>Proposta de edição de sessão</div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+            <Field label="Sessão"><input value={form.sessionId} onChange={e => setForm(f => ({ ...f, sessionId: e.target.value }))} placeholder="session id" style={IN} /></Field>
+            <Field label="Enviado por"><input value={form.submittedBy} onChange={e => setForm(f => ({ ...f, submittedBy: e.target.value }))} placeholder="nome ou empresa" style={IN} /></Field>
+            <Field label="Dispositivo (nome)"><input value={form.deviceName} onChange={e => setForm(f => ({ ...f, deviceName: e.target.value }))} style={IN} /></Field>
+            <Field label="Dispositivo (endereço)"><input value={form.deviceAddress} onChange={e => setForm(f => ({ ...f, deviceAddress: e.target.value }))} style={IN} /></Field>
+            <Field label="ID do filtro"><input value={form.filterId} onChange={e => setForm(f => ({ ...f, filterId: e.target.value }))} style={IN} /></Field>
+            <Field label="Nome do filtro"><input value={form.filterName} onChange={e => setForm(f => ({ ...f, filterName: e.target.value }))} style={IN} /></Field>
+            <Field label="Área m²"><input type="number" value={form.filterArea} onChange={e => setForm(f => ({ ...f, filterArea: e.target.value }))} style={IN} /></Field>
+            <Field label="Estação"><input value={form.filterStation} onChange={e => setForm(f => ({ ...f, filterStation: e.target.value }))} style={IN} /></Field>
+            <Field label="Local"><input value={form.filterLocation} onChange={e => setForm(f => ({ ...f, filterLocation: e.target.value }))} style={IN} /></Field>
+            <Field label="Unidade"><input value={form.filterUnit} onChange={e => setForm(f => ({ ...f, filterUnit: e.target.value }))} style={IN} /></Field>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+            <Btn kind="primary" onClick={submit}>Enviar proposta</Btn>
+            {msg.text && <span style={{ fontSize: 13, color: msg.kind === "ok" ? T.success : T.danger }}>{msg.text}</span>}
+          </div>
+        </Tile>
+      </div>
+    </>
+  );
+}
+
+/* ── Proposals page ── */
+
+function ProposalsPage({ proposals = [], role, api, onReload }) {
+  const [statusFilter, setStatusFilter] = useState("");
+  const [decMsg, setDecMsg] = useState({ kind: "", text: "" });
+  const { isMobile } = useLayout();
+  const items = statusFilter ? proposals.filter(p => p.status === statusFilter) : proposals;
+  const counts = { "": proposals.length };
+  proposals.forEach(p => { counts[p.status] = (counts[p.status] || 0) + 1; });
+
+  async function decide(id, action) {
+    setDecMsg({ kind: "", text: "" });
+    try {
+      await api(`/filtertrack/bi/proposals/${id}/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: "" }) });
+      setDecMsg({ kind: "ok", text: action === "approve" ? "Proposta aprovada." : "Proposta rejeitada." });
+      onReload();
+    } catch(e) { setDecMsg({ kind: "err", text: e.message }); }
+  }
+
+  const tabs = [{ id: "", label: "Todas" }, { id: "pending", label: "Pendentes" }, { id: "approved", label: "Aprovadas" }, { id: "rejected", label: "Rejeitadas" }];
+
+  return (
+    <>
+      <PageHeader crumbs={["Cagece", "FilterTrack BI", "Propostas"]} title="Fila de aprovação" />
+      <div style={{ display: "flex", borderBottom: `1px solid ${T.hairline}`, background: T.canvas, paddingLeft: isMobile ? 8 : 24, overflowX: "auto" }}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setStatusFilter(t.id)}
+            style={{ padding: isMobile ? "12px 10px" : "12px 16px", fontSize: 14, borderBottom: statusFilter === t.id ? `2px solid ${T.blue}` : "2px solid transparent", fontWeight: statusFilter === t.id ? 500 : 400, color: statusFilter === t.id ? T.ink : T.inkMuted, display: "inline-flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+            {t.label}
+            <Tag tone={statusFilter === t.id ? "blue" : "neutral"}>{counts[t.id] || 0}</Tag>
+          </button>
+        ))}
+      </div>
+      <div style={{ padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: 12, paddingBottom: isMobile ? 80 : 24 }}>
+        {decMsg.text && <div style={{ fontSize: 13, color: decMsg.kind === "ok" ? T.success : T.danger, padding: "8px 0" }}>{decMsg.text}</div>}
+        {items.length === 0 && <Tile padding={48} style={{ textAlign: "center" }}><div style={{ fontSize: 15, color: T.inkSubtle }}>Nenhuma proposta</div></Tile>}
+        {items.map(p => (
+          <Tile key={p.proposalId} padding={16}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexDirection: isMobile ? "column" : "row" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle }}>{p.proposalId}</span>
+                  <Tag tone="neutral">{(p.type || "").replace(/_/g, " ")}</Tag>
+                  <StatusTag status={p.status} />
+                </div>
+                <div style={{ fontSize: 12, color: T.inkSubtle, fontFamily: T.mono, marginBottom: 6 }}>{p.submittedBy || ""} · {shortDate(p.createdAt)}</div>
+                {p.targetSessionRef && <div style={{ fontSize: 13, marginBottom: 4 }}>Sessão: <span style={{ fontFamily: T.mono, color: T.blue }}>{p.targetSessionRef}</span></div>}
+                {p.targetFilterId && <div style={{ fontSize: 13, marginBottom: 4 }}>Filtro: <span style={{ fontFamily: T.mono, color: T.blue }}>{p.targetFilterId}</span></div>}
+                <pre style={{ fontFamily: T.mono, fontSize: 12, color: T.inkMuted, whiteSpace: "pre-wrap", wordBreak: "break-all", background: T.surface1, padding: 8, marginTop: 6 }}>{JSON.stringify(p.payload, null, 2)}</pre>
+              </div>
+              {role === "admin" && p.status === "pending" && (
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <Btn kind="tertiary" size="sm" onClick={() => decide(p.proposalId, "reject")}>Rejeitar</Btn>
+                  <Btn kind="primary" size="sm" onClick={() => decide(p.proposalId, "approve")}>Aprovar</Btn>
+                </div>
+              )}
+            </div>
+          </Tile>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ── Settings page ── */
+
+function SettingsPage({ api, registeredFilters = [] }) {
+  const [form, setForm] = useState({ name: "", areaM2: "", station: "", location: "", businessUnit: "", submittedBy: "" });
+  const [msg, setMsg] = useState({ kind: "", text: "" });
+  const { isMobile } = useLayout();
+
+  async function submitFilter() {
+    setMsg({ kind: "", text: "" });
+    try {
+      await api("/filtertrack/bi/proposals", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "custom_filter", submittedBy: form.submittedBy.trim(), payload: { filter: { name: form.name.trim(), areaM2: numOrNull(form.areaM2), station: form.station.trim(), location: form.location.trim(), businessUnit: form.businessUnit.trim(), custom: true } } }),
+      });
+      setMsg({ kind: "ok", text: "Proposta de novo filtro enviada." });
+      setForm(f => ({ ...f, name: "", areaM2: "", station: "", location: "", businessUnit: "" }));
+    } catch(e) { setMsg({ kind: "err", text: e.message }); }
+  }
+
+  function download(path, filename) {
+    const key = localStorage.getItem("filtertrack.bi.key") || "";
+    fetch(path, { headers: { "X-Access-Key": key } })
+      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); })
+      .then(blob => { const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); })
+      .catch(e => alert(e.message));
+  }
+
+  return (
+    <>
+      <PageHeader crumbs={["Cagece", "FilterTrack BI", "Ajustes"]} title="Ajustes" />
+      <div style={{ padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
+        <Tile padding={isMobile ? 16 : 20}>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 14 }}>Downloads</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn kind="tertiary" onClick={() => download("/filtertrack/bi/export/sessions.csv", "filtertrack-sessions.csv")}>Sessions CSV</Btn>
+            <Btn kind="tertiary" onClick={() => download("/filtertrack/bi/export/samples.csv", "filtertrack-samples.csv")}>Samples CSV</Btn>
+            <Btn kind="tertiary" onClick={() => download("/filtertrack/bi/export/sessions.json", "filtertrack-sessions.json")}>Full JSON</Btn>
+          </div>
+        </Tile>
+        <Tile padding={isMobile ? 16 : 20}>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 14 }}>Proposta de novo filtro</div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+            <Field label="Nome"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={IN} /></Field>
+            <Field label="Área m²"><input type="number" value={form.areaM2} onChange={e => setForm(f => ({ ...f, areaM2: e.target.value }))} style={IN} /></Field>
+            <Field label="Estação"><input value={form.station} onChange={e => setForm(f => ({ ...f, station: e.target.value }))} style={IN} /></Field>
+            <Field label="Local"><input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} style={IN} /></Field>
+            <Field label="Unidade"><input value={form.businessUnit} onChange={e => setForm(f => ({ ...f, businessUnit: e.target.value }))} style={IN} /></Field>
+            <Field label="Enviado por"><input value={form.submittedBy} onChange={e => setForm(f => ({ ...f, submittedBy: e.target.value }))} style={IN} /></Field>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+            <Btn kind="primary" onClick={submitFilter}>Enviar proposta</Btn>
+            {msg.text && <span style={{ fontSize: 13, color: msg.kind === "ok" ? T.success : T.danger }}>{msg.text}</span>}
+          </div>
+        </Tile>
+      </div>
+    </>
+  );
+}
+
+/* ── Login ── */
+
+function Login({ onAuth }) {
+  const keyRef = useRef(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const { isMobile } = useLayout();
+
+  async function handleLogin() {
+    const key = keyRef.current?.value?.trim();
+    if (!key) return;
+    setLoading(true); setError("");
+    try {
+      const resp = await fetch("/filtertrack/bi/auth", { headers: { "X-Access-Key": key } });
+      if (!resp.ok) { const b = await resp.json().catch(() => ({})); throw new Error(b.detail || "HTTP " + resp.status); }
+      const auth = await resp.json();
+      localStorage.setItem("filtertrack.bi.key", key);
+      onAuth({ key, role: auth.role });
+    } catch(e) { setError(e.message); } finally { setLoading(false); }
+  }
+
+  return (
+    <div id="login" style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: T.surface1, padding: isMobile ? 16 : 24 }}>
+      <div style={{ width: "100%", maxWidth: 400, background: T.canvas, border: `1px solid ${T.hairline}`, padding: isMobile ? 24 : 32 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginBottom: 28, textAlign: "center" }}>
+          <CageceMark size={40} />
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>FilterTrack BI</div>
+            <div style={{ fontSize: 12, color: T.inkSubtle }}>Cagece · painel operacional</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 6 }}>Chave de acesso</div>
+        <input id="accessKey" ref={keyRef} type="password" autoComplete="current-password" placeholder="••••••••"
+          style={{ width: "100%", height: 48, padding: "0 12px", background: T.surface1, border: "none", borderBottom: `2px solid ${error ? T.danger : T.hairlineStrong}`, fontSize: 14, fontFamily: T.mono, outline: "none", color: T.ink }}
+          onKeyDown={e => { if (e.key === "Enter") handleLogin(); }} />
+        {error && <div style={{ fontSize: 12, color: T.danger, marginTop: 6, marginBottom: 4 }}>{error}</div>}
+        <button id="loginBtn" onClick={handleLogin} disabled={loading}
+          style={{ width: "100%", height: 48, background: T.blue, color: "#fff", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 16, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1, border: "none" }}>
+          <span>{loading ? "Autenticando…" : "Entrar"}</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5"/></svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── App root ── */
+
+function App() {
+  const [authKey, setAuthKey] = useState(() => localStorage.getItem("filtertrack.bi.key") || "");
+  const [role, setRole] = useState("");
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [overview, setOverview] = useState(null);
+  const [proposals, setProposals] = useState([]);
+  const [registeredFilters, setRegisteredFilters] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [params, setParams] = useState({ from: "", to: "", deviceAddress: "", filterId: "" });
+  const [view, setView] = useState("overview");
+  const isMobile = useMediaQuery("(max-width: 760px)");
+  const isNarrow = useMediaQuery("(max-width: 1100px)");
+
+  function api(path, opts = {}) {
+    const key = localStorage.getItem("filtertrack.bi.key") || authKey;
+    return fetch(path, { ...opts, headers: { "X-Access-Key": key, ...(opts.headers || {}) } }).then(async r => {
+      if (!r.ok) { let m = "HTTP " + r.status; try { const b = await r.json(); m = b.detail || m; } catch(_) {} throw new Error(m); }
+      return r.json();
+    });
+  }
+
+  function buildQs() {
+    const p = new URLSearchParams();
+    if (params.from) p.set("from", new Date(params.from).toISOString());
+    if (params.to) p.set("to", new Date(params.to).toISOString());
+    if (params.deviceAddress) p.set("deviceAddress", params.deviceAddress);
+    if (params.filterId) p.set("filterId", params.filterId);
+    const s = p.toString(); return s ? "?" + s : "";
+  }
+
+  async function loadAll() {
+    setLoading(true); setLoadError("");
+    try {
+      const [auth, ov, prop, rf] = await Promise.all([
+        api("/filtertrack/bi/auth"),
+        api("/filtertrack/bi/overview" + buildQs()),
+        api("/filtertrack/bi/proposals"),
+        api("/filtertrack/bi/filters?includeArchived=true"),
+      ]);
+      setRole(auth.role);
+      setOverview(ov);
+      setProposals(prop.items || []);
+      setRegisteredFilters(rf.items || []);
+    } catch(e) {
+      setLoadError(e.message);
+      if (/401|unauthorized|access/i.test(e.message)) { setLoggedIn(false); }
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    if (!authKey) return;
+    api("/filtertrack/bi/auth")
+      .then(auth => { setRole(auth.role); setLoggedIn(true); })
+      .catch(() => { localStorage.removeItem("filtertrack.bi.key"); setAuthKey(""); });
+  }, []);
+
+  useEffect(() => { if (loggedIn) loadAll(); }, [loggedIn]);
+
+  function handleAuth({ key, role }) { setAuthKey(key); setRole(role); setLoggedIn(true); }
+  function handleLogout() { localStorage.removeItem("filtertrack.bi.key"); setAuthKey(""); setRole(""); setLoggedIn(false); setOverview(null); }
+
+  if (!loggedIn) {
+    return (
+      <LayoutCtx.Provider value={{ isMobile, isNarrow }}>
+        <Login onAuth={handleAuth} />
+      </LayoutCtx.Provider>
+    );
+  }
+
+  return (
+    <LayoutCtx.Provider value={{ isMobile, isNarrow }}>
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        <Header role={role} onLogout={handleLogout} />
+        <div style={{ display: "flex", flex: 1 }}>
+          <Sidebar view={view} onChange={setView} role={role} />
+          <main style={{ flex: 1, minWidth: 0, background: T.surface1, paddingBottom: isMobile ? 64 : 0 }}>
+            {loadError && (
+              <div style={{ padding: "10px 24px", background: "#ffd7d9", color: T.danger, fontSize: 13, display: "flex", gap: 12, alignItems: "center" }}>
+                <span>{loadError}</span>
+                <button onClick={loadAll} style={{ color: T.danger, textDecoration: "underline", fontSize: 13 }}>Tentar novamente</button>
+              </div>
+            )}
+            {loading && !overview && <div style={{ padding: 48, textAlign: "center", color: T.inkSubtle }}>Carregando…</div>}
+            {view === "overview"  && overview && <OverviewPage overview={overview} registeredFilters={registeredFilters} params={params} setParams={setParams} onApply={loadAll} />}
+            {view === "filters"   && <FiltersPage registeredFilters={registeredFilters} api={api} onReload={loadAll} />}
+            {view === "sessions"  && <SessionsPage overview={overview} api={api} onReload={loadAll} />}
+            {view === "proposals" && <ProposalsPage proposals={proposals} role={role} api={api} onReload={loadAll} />}
+            {view === "settings"  && <SettingsPage api={api} registeredFilters={registeredFilters} />}
+          </main>
+        </div>
+      </div>
+    </LayoutCtx.Provider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("app-root")).render(<App />);
+</script>
+</body>
+</html>

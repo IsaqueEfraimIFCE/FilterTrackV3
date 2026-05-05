@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "app": "FilterTrack",
+  "uploadedAt": "2026-04-24T16:26:00Z",
+  "session": {
+    "id": "prod-smoke-2",
+    "startedAt": "2026-04-24T16:25:00Z",
+    "endedAt": "2026-04-24T16:26:00Z",
+    "sampleCount": 1,
+    "endReason": "manual",
+    "device": {
+      "name": "filtertrack-01",
+      "address": "AA:BB:CC:DD:EE:FF"
+    },
+    "filter": {
+      "id": "3163df6c",
+      "name": "FIL-01 Asc",
+      "areaM2": 1.8,
+      "station": "ETA 01 - ARNEIROZ",
+      "location": "ARNEIROZ",
+      "businessUnit": "UN-BAJ",
+      "flowDirection": "Asc"
+    },
+    "samples": [
+      {
+        "ts": 1777030714029,
+        "isoTime": "2026-04-24T11:38:34.029Z",
+        "distanceCm": 24.28,
+        "flow10sLpm": -5.51799,
+        "flow60sLpm": -0.20265,
+        "flowSessionLpm": -0.11,
+        "direction": "Fluxo descendente ou descarga no filtro"
+      }
+    ]
+  }
+}

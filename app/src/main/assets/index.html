@@ -3,529 +3,1313 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>FilterTrack — Cagece</title>
+<title>FilterTrack</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; background: #080c14; font-family: 'Space Grotesk', sans-serif; overflow: hidden; color: #f0f2f8; }
-  #root { width: 100vw; height: 100vh; display: flex; }
+:root {
+  --cagece-blue: #0068B4; --cagece-blue-hover: #0058a0; --cagece-blue-active: #00477f;
+  --cagece-blue-10: #e6f0f9; --cagece-teal: #009ca6;
+  --ink: #161616; --ink-muted: #525252; --ink-subtle: #6f6f6f; --ink-tertiary: #a8a8a8;
+  --canvas: #ffffff; --surface-1: #f4f4f4; --surface-2: #e8e8e8;
+  --hairline: #e0e0e0; --hairline-strong: #8d8d8d;
+  --success: #198038; --warning: #b28600; --danger: #da1e28; --focus: #0f62fe;
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  background: var(--surface-1); color: var(--ink);
+  font-family: var(--font-sans); font-size: 16px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; overflow: hidden;
+}
+#root { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+input, select, button, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; }
+a { color: var(--cagece-blue); text-decoration: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { background: var(--surface-2); }
 </style>
 </head>
 <body>
 <div id="root"></div>
-
+<script type="application/json" id="ft-default-filters">[{"id":"3163df6c","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA 01 - ARNEIROZ","location":"ARNEIROZ","businessUnit":"UN-BAJ"},{"id":"dcc9d039","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 01 - ARNEIROZ","location":"ARNEIROZ","businessUnit":"UN-BAJ"},{"id":"cbc107c9","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA 01 - ARNEIROZ","location":"ARNEIROZ","businessUnit":"UN-BAJ"},{"id":"64646fc6","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 01 - AURORA","location":"AURORA","businessUnit":"UN-BSA"},{"id":"9f0f0695","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA 01 - AURORA","location":"AURORA","businessUnit":"UN-BSA"},{"id":"fbd850ec","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA 01 - BROTAS","location":"MIRAÍMA","businessUnit":"UN-BCL"},{"id":"f0368095","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 01 - CASCAVEL","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"904de488","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA 01 - CASCAVEL","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"7690b75c","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA 01 - CASCAVEL","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"ff1e5532","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA 01 - CASCAVEL","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"4725162a","name":"FIL-05 Asc","areaM2":7.07,"station":"ETA 01 - CASCAVEL","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"6b031623","name":"FIL-06 Asc","areaM2":7.07,"station":"ETA 01 - CASCAVEL","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"e45a8a90","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 01 - CEDRO","location":"CEDRO","businessUnit":"UN-BSA"},{"id":"17343622","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA 01 - CEDRO","location":"CEDRO","businessUnit":"UN-BSA"},{"id":"d287d5ba","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA 01 - CEDRO","location":"CEDRO","businessUnit":"UN-BSA"},{"id":"04c98e52","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA 01 - CUMBE","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"241f2c45","name":"FIL-02 Asc","areaM2":9.63,"station":"ETA 01 - CUMBE","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"d6f191a7","name":"FIL-03 Asc","areaM2":9.63,"station":"ETA 01 - CUMBE","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"5fe9e828","name":"FIL-04 Asc","areaM2":9.63,"station":"ETA 01 - CUMBE","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"1915b7f7","name":"FIL-05 Asc","areaM2":9.63,"station":"ETA 01 - CUMBE","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"4dd0033a","name":"FIL-06 Asc","areaM2":9.63,"station":"ETA 01 - CUMBE","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"ddf27462","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA 01 - FORTIM","location":"FORTIM","businessUnit":"UN-BBJ"},{"id":"59096fee","name":"FIL-01 Asc","areaM2":9,"station":"ETA 01 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"4725cad9","name":"FIL-02 Asc","areaM2":9,"station":"ETA 01 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"427558b0","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA 01 - MARCO","location":"MARCO","businessUnit":"UN-BAC"},{"id":"d781b187","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA 01 - MARCO","location":"MARCO","businessUnit":"UN-BAC"},{"id":"e9fca1b2","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA 01 - MARCO","location":"MARCO","businessUnit":"UN-BAC"},{"id":"fb44772f","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 01 - PARACURU","location":"PARACURU","businessUnit":"UN-BCL"},{"id":"9142b2e2","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA 01 - PARACURU","location":"PARACURU","businessUnit":"UN-BCL"},{"id":"452d710d","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA 01 - PARACURU","location":"PARACURU","businessUnit":"UN-BCL"},{"id":"1a309a79","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA 01 - PARACURU","location":"PARACURU","businessUnit":"UN-BCL"},{"id":"4575ecdd","name":"FIL-01 Desc","areaM2":3.15,"station":"ETA 01 - QUITAIÚS","location":"LAVRAS DA MANGABEIRA","businessUnit":"UN-BSA"},{"id":"edd1f36c","name":"FIL-02 Desc","areaM2":3.15,"station":"ETA 01 - QUITAIÚS","location":"LAVRAS DA MANGABEIRA","businessUnit":"UN-BSA"},{"id":"45d1aab5","name":"FIL-03 Desc","areaM2":3.15,"station":"ETA 01 - QUITAIÚS","location":"LAVRAS DA MANGABEIRA","businessUnit":"UN-BSA"},{"id":"a538f719","name":"FIL-04 Desc","areaM2":3.15,"station":"ETA 01 - QUITAIÚS","location":"LAVRAS DA MANGABEIRA","businessUnit":"UN-BSA"},{"id":"a8985896","name":"FIL-05 Desc","areaM2":3.15,"station":"ETA 01 - QUITAIÚS","location":"LAVRAS DA MANGABEIRA","businessUnit":"UN-BSA"},{"id":"43751c2a","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA 01 - SEDE","location":"CATARINA","businessUnit":"UN-BAJ"},{"id":"21aa9a54","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA 01 - SEDE","location":"CATARINA","businessUnit":"UN-BAJ"},{"id":"61bb7b83","name":"FPR-01 Desc","areaM2":4.53,"station":"ETA 01 - SEDE","location":"CATARINA","businessUnit":"UN-BAJ"},{"id":"6659ff0a","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 01 - TAPERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"a8b6cec4","name":"FPR-01 Asc","areaM2":0.79,"station":"ETA 01 - TAPERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"c0a1ae71","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA 01-POTIRETAMA","location":"POTIRETAMA","businessUnit":"UN-BBJ"},{"id":"ac36e2c2","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA 01-POTIRETAMA","location":"POTIRETAMA","businessUnit":"UN-BBJ"},{"id":"8b4f8937","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA 02 - ARNEIROZ","location":"ARNEIROZ","businessUnit":"UN-BAJ"},{"id":"e8abdc92","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA 02 - ARNEIROZ","location":"ARNEIROZ","businessUnit":"UN-BAJ"},{"id":"fe28cc59","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 02 - ARNEIROZ","location":"ARNEIROZ","businessUnit":"UN-BAJ"},{"id":"0b60d04c","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA 02 - ARNEIROZ","location":"ARNEIROZ","businessUnit":"UN-BAJ"},{"id":"71ddc072","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA 02 - ARNEIROZ","location":"ARNEIROZ","businessUnit":"UN-BAJ"},{"id":"73be9b25","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 02 - AURORA","location":"AURORA","businessUnit":"UN-BSA"},{"id":"821f1cf2","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA 02 - AURORA","location":"AURORA","businessUnit":"UN-BSA"},{"id":"c90f964a","name":"FIL-01 Asc","areaM2":1.14,"station":"ETA 02 - CAMPESTRE","location":"FORTIM","businessUnit":"UN-BBJ"},{"id":"3e1eacd5","name":"FIL-01 Desc","areaM2":6.01,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"ddf8457f","name":"FIL-02 Desc","areaM2":6.01,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"29fc71bc","name":"FIL-03 Desc","areaM2":6.01,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"b4694400","name":"FIL-04 Desc","areaM2":6.01,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"51c54770","name":"FIL-05 Desc","areaM2":10.63,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"4bc679d9","name":"FIL-06 Desc","areaM2":10.63,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"f7363fe5","name":"FIL-07 Desc","areaM2":10.63,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"3569685f","name":"FIL-08 Desc","areaM2":10.63,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"e3d3d74f","name":"FIL-09 Asc","areaM2":4.91,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"da1373bf","name":"FIL-10 Asc","areaM2":4.91,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"c38e2e65","name":"FIL-11 Asc","areaM2":9.63,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"b5bddba5","name":"FIL-12 Asc","areaM2":7.07,"station":"ETA 02 - ITAPIPOCA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"caf40baa","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA 02 - JERIMUM","location":"POTIRETAMA","businessUnit":"UN-BBJ"},{"id":"09570d6f","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA 02 - JERIMUM","location":"POTIRETAMA","businessUnit":"UN-BBJ"},{"id":"3beaf2ca","name":"FIL-01 Asc","areaM2":19.64,"station":"ETA 02 - MAL COZINHADO","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"8e73449e","name":"FIL-01 Desc","areaM2":12.57,"station":"ETA 02 - MAL COZINHADO","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"53df2c5a","name":"FIL-02 Asc","areaM2":19.64,"station":"ETA 02 - MAL COZINHADO","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"f7eb9dd1","name":"FIL-02 Desc","areaM2":12.57,"station":"ETA 02 - MAL COZINHADO","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"e14ecd8e","name":"FIL-03 Asc","areaM2":19.64,"station":"ETA 02 - MAL COZINHADO","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"0bf06378","name":"FIL-03 Desc","areaM2":12.57,"station":"ETA 02 - MAL COZINHADO","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"710e740a","name":"FIL-04 Asc","areaM2":19.64,"station":"ETA 02 - MAL COZINHADO","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"3893da32","name":"FIL-04 Desc","areaM2":12.57,"station":"ETA 02 - MAL COZINHADO","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"2c7d4c16","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA 02 - MAMOEIRO","location":"ANTONINA DO NORTE","businessUnit":"UN-BAJ"},{"id":"aac50700","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA 02 - MAMOEIRO","location":"ANTONINA DO NORTE","businessUnit":"UN-BAJ"},{"id":"bc4830e7","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA 02 - MAMOEIRO","location":"ANTONINA DO NORTE","businessUnit":"UN-BAJ"},{"id":"2ec88f04","name":"FIL-04 Desc","areaM2":3.15,"station":"ETA 02 - MAMOEIRO","location":"ANTONINA DO NORTE","businessUnit":"UN-BAJ"},{"id":"727051da","name":"FIL-05 Desc","areaM2":3.15,"station":"ETA 02 - MAMOEIRO","location":"ANTONINA DO NORTE","businessUnit":"UN-BAJ"},{"id":"3289eb50","name":"FIL-06 Desc","areaM2":3.15,"station":"ETA 02 - MAMOEIRO","location":"ANTONINA DO NORTE","businessUnit":"UN-BAJ"},{"id":"691960dd","name":"FIL-01 Asc","areaM2":null,"station":"ETA 02 - MARCO","location":"MARCO","businessUnit":"UN-BAC"},{"id":"539936c5","name":"FIL-02 Asc","areaM2":null,"station":"ETA 02 - MARCO","location":"MARCO","businessUnit":"UN-BAC"},{"id":"d7d0de7d","name":"FIL-03 Asc","areaM2":null,"station":"ETA 02 - MARCO","location":"MARCO","businessUnit":"UN-BAC"},{"id":"2e08c08a","name":"FIL-01 Desc","areaM2":7.07,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"fc1f3627","name":"FIL-02 Desc","areaM2":7.07,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"7f228794","name":"FIL-03 Desc","areaM2":7.07,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"4979e2b1","name":"FIL-04 Desc","areaM2":7.07,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"1d32249c","name":"FIL-05 Desc","areaM2":7.07,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"a4efae76","name":"FIL-06 Desc","areaM2":7.07,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"abd0c0ee","name":"FIL-07 Desc","areaM2":7.07,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"467612bb","name":"FIL-08 Desc","areaM2":7.07,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"87f8cd9b","name":"FTF-01 Asc","areaM2":null,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"ee8bb38c","name":"FTF-02 Asc","areaM2":null,"station":"ETA 02 - PEDREGAL","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"0adf705a","name":"FIL-01 Asc","areaM2":null,"station":"ETA 02 - RIVIERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"7320dcd7","name":"FIL-02 Asc","areaM2":null,"station":"ETA 02 - RIVIERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"1209d7ed","name":"FIL-03 Asc","areaM2":null,"station":"ETA 02 - RIVIERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"f03dc3cd","name":"FIL-04 Asc","areaM2":null,"station":"ETA 02 - RIVIERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"91048ea8","name":"FIL-05 Desc","areaM2":null,"station":"ETA 02 - RIVIERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"37a871f8","name":"FIL-06 Desc","areaM2":null,"station":"ETA 02 - RIVIERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"cf24401b","name":"FIL-07 Desc","areaM2":null,"station":"ETA 02 - RIVIERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"cff0fb77","name":"FIL-08 Desc","areaM2":null,"station":"ETA 02 - RIVIERA","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"4219f40a","name":"FIL-01 Desc","areaM2":1.54,"station":"ETA 02 - SÃO GONÇALO","location":"CATARINA","businessUnit":"UN-BAJ"},{"id":"b3568b85","name":"FIL-02 Desc","areaM2":1.54,"station":"ETA 02 - SÃO GONÇALO","location":"CATARINA","businessUnit":"UN-BAJ"},{"id":"693d0a8b","name":"FIL-03 Desc","areaM2":1.54,"station":"ETA 02 - SÃO GONÇALO","location":"CATARINA","businessUnit":"UN-BAJ"},{"id":"439cd72e","name":"FIL-04 Desc","areaM2":1.54,"station":"ETA 02 - SÃO GONÇALO","location":"CATARINA","businessUnit":"UN-BAJ"},{"id":"f490733a","name":"FIL-05 Desc","areaM2":1.54,"station":"ETA 02 - SÃO GONÇALO","location":"CATARINA","businessUnit":"UN-BAJ"},{"id":"d3955293","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA 02 - UBAÚNA","location":"COREAÚ","businessUnit":"UN-BAC"},{"id":"41d3203a","name":"FPR-01 Asc","areaM2":7.07,"station":"ETA 02 - UBAÚNA","location":"COREAÚ","businessUnit":"UN-BAC"},{"id":"cc901ab2","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA 02 - VÁRZEA DA CONCEIÇÃO","location":"CEDRO","businessUnit":"UN-BSA"},{"id":"1f652d21","name":"FIL-02 Asc","areaM2":1.77,"station":"ETA 02 - VÁRZEA DA CONCEIÇÃO","location":"CEDRO","businessUnit":"UN-BSA"},{"id":"c31c9d55","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA ACARAÚ","location":"ACARAÚ","businessUnit":"UN-BAC"},{"id":"892cb57d","name":"FIL-02 Asc","areaM2":9.63,"station":"ETA ACARAÚ","location":"ACARAÚ","businessUnit":"UN-BAC"},{"id":"621a05c4","name":"FIL-01 Asc","areaM2":16,"station":"ETA ACOPIARA","location":"ACOPIARA","businessUnit":"UN-BAJ"},{"id":"1ee24449","name":"FIL-02 Asc","areaM2":16,"station":"ETA ACOPIARA","location":"ACOPIARA","businessUnit":"UN-BAJ"},{"id":"ffdedc01","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA ÁGUA VERDE","location":"GUAIÚBA","businessUnit":"UN-BMO"},{"id":"f7bccdf0","name":"FPR-01 Desc","areaM2":9.08,"station":"ETA ÁGUA VERDE","location":"GUAIÚBA","businessUnit":"UN-BMO"},{"id":"cfa901ff","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA ALAGOINHA","location":"ARARIPE","businessUnit":"UN-BAJ"},{"id":"31a720f1","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA ALCÂNTARAS","location":"ALCÂNTARAS","businessUnit":"UN-BAC"},{"id":"9c7b7c0f","name":"FPR-01 Desc","areaM2":7.07,"station":"ETA ALCÂNTARAS","location":"ALCÂNTARAS","businessUnit":"UN-BAC"},{"id":"71a3dd6b","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA ALTANEIRA","location":"ALTANEIRA","businessUnit":"UN-BSA"},{"id":"50b50cb8","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA ALTANEIRA","location":"ALTANEIRA","businessUnit":"UN-BSA"},{"id":"e51270f6","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA ALTO SANTO","location":"ALTO SANTO","businessUnit":"UN-BBJ"},{"id":"4c003346","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA ALTO SANTO","location":"ALTO SANTO","businessUnit":"UN-BBJ"},{"id":"18ded4da","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA ALTO SANTO","location":"ALTO SANTO","businessUnit":"UN-BBJ"},{"id":"e2f5f6cc","name":"FIL-04 Asc","areaM2":null,"station":"ETA ALTO SANTO","location":"ALTO SANTO","businessUnit":"UN-BBJ"},{"id":"1fd5c3ae","name":"FTF-01 Desc","areaM2":4.91,"station":"ETA ALTO SANTO","location":"ALTO SANTO","businessUnit":"UN-BBJ"},{"id":"02a8bdaa","name":"FTF-02 Desc","areaM2":4.91,"station":"ETA ALTO SANTO","location":"ALTO SANTO","businessUnit":"UN-BBJ"},{"id":"d42ba9e2","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA AMANARI","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"f5fcaa56","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA AMANARI","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"3fb13d74","name":"FIL-03 Asc","areaM2":3.15,"station":"ETA AMANARI","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"e80734ce","name":"FPR-01 Desc","areaM2":1.77,"station":"ETA AMANARI","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"52bc2b48","name":"FIL-01 Asc","areaM2":5.94,"station":"ETA AMANIUTUBA","location":"LAVRAS DA MANGABEIRA","businessUnit":"UN-BSA"},{"id":"6fde74b9","name":"FIL-01 Asc","areaM2":9.61,"station":"ETA APUIARÉS","location":"APUIARÉS","businessUnit":"UN-BCL"},{"id":"dd79a433","name":"FIL-02 Asc","areaM2":9.61,"station":"ETA APUIARÉS","location":"APUIARÉS","businessUnit":"UN-BCL"},{"id":"2b82c4d5","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA AQUIRAZ","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"29ff7691","name":"FIL-02 Asc","areaM2":9.63,"station":"ETA AQUIRAZ","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"8bcb9311","name":"FIL-03 Asc","areaM2":9.63,"station":"ETA AQUIRAZ","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"f7ee6a4a","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA AQUIRAZ","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"e271a0f8","name":"FIL-05 Asc","areaM2":7.07,"station":"ETA AQUIRAZ","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"cdebf6d1","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA AQUIRAZ","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"de43a925","name":"FPR-02 Desc","areaM2":4.91,"station":"ETA AQUIRAZ","location":"AQUIRAZ","businessUnit":"UN-BML"},{"id":"41d9f7a0","name":"FIL-01 Asc","areaM2":14.53,"station":"ETA ARACOIABA","location":"ARACOIABA","businessUnit":"UN-BMO"},{"id":"6b902546","name":"FIL-02 Asc","areaM2":14.53,"station":"ETA ARACOIABA","location":"ARACOIABA","businessUnit":"UN-BMO"},{"id":"ab3399e0","name":"FIL-03 Asc","areaM2":14.53,"station":"ETA ARACOIABA","location":"ARACOIABA","businessUnit":"UN-BMO"},{"id":"27d22d0c","name":"FIL-04 Asc","areaM2":14.53,"station":"ETA ARACOIABA","location":"ARACOIABA","businessUnit":"UN-BMO"},{"id":"d3167768","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA ASSARÉ","location":"ASSARÉ","businessUnit":"UN-BAJ"},{"id":"41e9a17f","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA ASSARÉ","location":"ASSARÉ","businessUnit":"UN-BAJ"},{"id":"66693e7e","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA ASSARÉ","location":"ASSARÉ","businessUnit":"UN-BAJ"},{"id":"ebb4a603","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA BAIXIO","location":"BAIXIO","businessUnit":"UN-BSA"},{"id":"6ec86cf6","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA BAIXIO","location":"BAIXIO","businessUnit":"UN-BSA"},{"id":"64af209e","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA BAIXIO","location":"BAIXIO","businessUnit":"UN-BSA"},{"id":"7560d8c2","name":"FIL-01 Desc","areaM2":9,"station":"ETA BATURITÉ","location":"BATURITÉ","businessUnit":"UN-BMO"},{"id":"8629ed81","name":"FIL-02 Desc","areaM2":9,"station":"ETA BATURITÉ","location":"BATURITÉ","businessUnit":"UN-BMO"},{"id":"cfed4a93","name":"FIL-03 Desc","areaM2":9,"station":"ETA BATURITÉ","location":"BATURITÉ","businessUnit":"UN-BMO"},{"id":"6ad2e060","name":"FIL-04 Desc","areaM2":9,"station":"ETA BATURITÉ","location":"BATURITÉ","businessUnit":"UN-BMO"},{"id":"b63edb67","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA BEBERIBE","location":"BEBERIBE","businessUnit":"UN-BML"},{"id":"f9fa80f5","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA BEBERIBE","location":"BEBERIBE","businessUnit":"UN-BML"},{"id":"2592aff9","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA BELA CRUZ","location":"BELA CRUZ","businessUnit":"UN-BAC"},{"id":"8a792128","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA BELA CRUZ","location":"BELA CRUZ","businessUnit":"UN-BAC"},{"id":"973be271","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA BELA CRUZ","location":"BELA CRUZ","businessUnit":"UN-BAC"},{"id":"b1910f10","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA BELA CRUZ","location":"BELA CRUZ","businessUnit":"UN-BAC"},{"id":"502ec610","name":"FIL-05 Asc","areaM2":7.07,"station":"ETA BELA CRUZ","location":"BELA CRUZ","businessUnit":"UN-BAC"},{"id":"fae3b254","name":"FIL-01 Asc","areaM2":2.55,"station":"ETA BETÂNIA","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"7d1eb728","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA BONHU","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"b9016d6e","name":"FPR-01 Asc","areaM2":4.91,"station":"ETA BREJO GRANDE","location":"SANTANA DO CARIRI","businessUnit":"UN-BSA"},{"id":"5ed2c90e","name":"FPR-02 Asc","areaM2":4.91,"station":"ETA BREJO GRANDE","location":"SANTANA DO CARIRI","businessUnit":"UN-BSA"},{"id":"6a7d18db","name":"FIL-01 Desc","areaM2":86.6,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"7e76934b","name":"FIL-02 Desc","areaM2":7.07,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"9806eddb","name":"FIL-03 Desc","areaM2":7.07,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"ecdc825b","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"6b682a63","name":"FIL-05 Asc","areaM2":4.91,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"a71dca1a","name":"FIL-06 Asc","areaM2":4.91,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"b11794b7","name":"FIL-07 Asc","areaM2":4.91,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"c7c0efe5","name":"FPR-01 Desc","areaM2":2.02,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"3bf2a1b1","name":"FPR-02 Desc","areaM2":2.02,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"709fb227","name":"FPR-03 Desc","areaM2":4.53,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"14eb5b9e","name":"FPR-04 Desc","areaM2":4.53,"station":"ETA CAMPOS SALES","location":"CAMPOS SALES","businessUnit":"UN-BAJ"},{"id":"d82da602","name":"FIL-01 Desc","areaM2":3.15,"station":"ETA CAPISTRANO","location":"CAPISTRANO","businessUnit":"UN-BBA"},{"id":"7646cb6c","name":"FIL-02 Desc","areaM2":3.15,"station":"ETA CAPISTRANO","location":"CAPISTRANO","businessUnit":"UN-BBA"},{"id":"72c8315b","name":"FIL-03 Desc","areaM2":3.15,"station":"ETA CAPISTRANO","location":"CAPISTRANO","businessUnit":"UN-BBA"},{"id":"4a5c2ac8","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA CAPISTRANO","location":"CAPISTRANO","businessUnit":"UN-BBA"},{"id":"f5d9d26a","name":"FIL-05 Asc","areaM2":4.91,"station":"ETA CAPISTRANO","location":"CAPISTRANO","businessUnit":"UN-BBA"},{"id":"c9c0f16f","name":"FIL-06 Asc","areaM2":4.91,"station":"ETA CAPISTRANO","location":"CAPISTRANO","businessUnit":"UN-BBA"},{"id":"75f16bd8","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA CAPONGA","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"07e2b938","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA CAPONGA","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"de5fc3b3","name":"FIL-03 Asc","areaM2":3.15,"station":"ETA CAPONGA","location":"CASCAVEL","businessUnit":"UN-BML"},{"id":"b98a86b4","name":"FIL-01","areaM2":4.91,"station":"ETA CARIDADE","location":"CARIDADE","businessUnit":"UN-BBA"},{"id":"d5a36f81","name":"FIL-02","areaM2":4.91,"station":"ETA CARIDADE","location":"CARIDADE","businessUnit":"UN-BBA"},{"id":"f04e1da6","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA CARIDADE","location":"CARIDADE","businessUnit":"UN-BBA"},{"id":"c3391ea0","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA CARIDADE","location":"CARIDADE","businessUnit":"UN-BBA"},{"id":"55c504ef","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA CARIRÉ","location":"CARIRÉ","businessUnit":"UN-BAC"},{"id":"83c26f8c","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA CARIRÉ","location":"CARIRÉ","businessUnit":"UN-BAC"},{"id":"56b27d0f","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA CARIUS","location":"CARIÚS","businessUnit":"UN-BAJ"},{"id":"f6983f5a","name":"FIL-01 Asc","areaM2":9.35,"station":"ETA CATUANA","location":"CAUCAIA","businessUnit":"UN-BCL"},{"id":"e6cca540","name":"FIL-02 Asc","areaM2":9.35,"station":"ETA CATUANA","location":"CAUCAIA","businessUnit":"UN-BCL"},{"id":"d0a2c4b3","name":"FIL-03 Asc","areaM2":9.35,"station":"ETA CATUANA","location":"CAUCAIA","businessUnit":"UN-BCL"},{"id":"67f344b5","name":"FIL-01 Desc","areaM2":1.77,"station":"ETA CATUNDA","location":"CATUNDA","businessUnit":"UN-BSC"},{"id":"56b246e9","name":"FIL-02 Desc","areaM2":1.77,"station":"ETA CATUNDA","location":"CATUNDA","businessUnit":"UN-BSC"},{"id":"40a981ae","name":"FIL-03 Desc","areaM2":1.77,"station":"ETA CATUNDA","location":"CATUNDA","businessUnit":"UN-BSC"},{"id":"285e00e3","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA CEMOABA","location":"TURURU","businessUnit":"UN-BCL"},{"id":"7f9373e3","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA CHAVAL","location":"CHAVAL","businessUnit":"UN-BSI"},{"id":"a5435b24","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA CHAVAL","location":"CHAVAL","businessUnit":"UN-BSI"},{"id":"ec8f6001","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA CHAVAL","location":"CHAVAL","businessUnit":"UN-BSI"},{"id":"f819c0cf","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA CHORÓ","location":"CHORÓ","businessUnit":"UN-BBA"},{"id":"2306fe2e","name":"FIL-01 Desc","areaM2":4.91,"station":"ETA CHORÓ","location":"CHORÓ","businessUnit":"UN-BBA"},{"id":"e3480c6a","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA CHORÓ","location":"CHORÓ","businessUnit":"UN-BBA"},{"id":"b474c494","name":"FIL-03 Desc","areaM2":7.07,"station":"ETA CHORÓ","location":"CHORÓ","businessUnit":"UN-BBA"},{"id":"8f2da104","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA CHORÓ","location":"CHORÓ","businessUnit":"UN-BBA"},{"id":"ccfa6feb","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA CRIOULAS","location":"PEREIRO","businessUnit":"UN-BBJ"},{"id":"490aa436","name":"FIL-02 Asc","areaM2":1.77,"station":"ETA CRIOULAS","location":"PEREIRO","businessUnit":"UN-BBJ"},{"id":"6eec172d","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA CRUZ","location":"CRUZ","businessUnit":"UN-BAC"},{"id":"4e52164a","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA CRUZ","location":"CRUZ","businessUnit":"UN-BAC"},{"id":"c5dea760","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA DESERTO","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"f7132bce","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA DESERTO","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"c60670ef","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA EMA","location":"IRACEMA","businessUnit":"UN-BBJ"},{"id":"c43d8d08","name":"FIL-02 Asc","areaM2":9.63,"station":"ETA EMA","location":"IRACEMA","businessUnit":"UN-BBJ"},{"id":"9c2c6ee4","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA FARIAS BRITO","location":"FARIAS BRITO","businessUnit":"UN-BSA"},{"id":"37a3a70b","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA FLORES","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"d2532242","name":"FIL-02 Asc","areaM2":1.77,"station":"ETA FLORES","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"814ed1f3","name":"FIL-01 Desc","areaM2":1.44,"station":"ETA FORQUILHA","location":"FORQUILHA","businessUnit":"UN-BAC"},{"id":"415fd9aa","name":"FIL-02 Desc","areaM2":1.44,"station":"ETA FORQUILHA","location":"FORQUILHA","businessUnit":"UN-BAC"},{"id":"93a881b8","name":"FIL-03 Desc","areaM2":1.44,"station":"ETA FORQUILHA","location":"FORQUILHA","businessUnit":"UN-BAC"},{"id":"84720c04","name":"FIL-04 Desc","areaM2":1.44,"station":"ETA FORQUILHA","location":"FORQUILHA","businessUnit":"UN-BAC"},{"id":"ef4a33cd","name":"FIL-05 Asc","areaM2":9.63,"station":"ETA FORQUILHA","location":"FORQUILHA","businessUnit":"UN-BAC"},{"id":"9968d542","name":"FIL-06 Asc","areaM2":9.63,"station":"ETA FORQUILHA","location":"FORQUILHA","businessUnit":"UN-BAC"},{"id":"87dcc4d1","name":"FIL-01 Asc","areaM2":12.57,"station":"ETA FRECHEIRINHA","location":"FRECHEIRINHA","businessUnit":"UN-BAC"},{"id":"c3dcceeb","name":"FIL-02 Asc","areaM2":12.57,"station":"ETA FRECHEIRINHA","location":"FRECHEIRINHA","businessUnit":"UN-BAC"},{"id":"f17f5a00","name":"FIL-01 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"eca99f2c","name":"FIL-02 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"375453ee","name":"FIL-03 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"0ab46f9f","name":"FIL-04 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"66b0a901","name":"FIL-05 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"3b7d5266","name":"FIL-06 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"19bce9e6","name":"FIL-07 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"23672350","name":"FIL-08 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"9afd5235","name":"FIL-09 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"abd0cc17","name":"FIL-10 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"69ceb584","name":"FIL-11 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"6e5caa40","name":"FIL-12 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"5ee22d81","name":"FIL-13 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"0e21d5fe","name":"FIL-14 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"ef1ce486","name":"FIL-15 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"f5bb075a","name":"FIL-16 Desc","areaM2":70,"station":"ETA GAVIÃO","location":"PACATUBA","businessUnit":"UN-MPA"},{"id":"a2c4e67e","name":"FIL-01 Asc","areaM2":2.02,"station":"ETA GENERAL SAMPAIO","location":"GENERAL SAMPAIO","businessUnit":"UN-BCL"},{"id":"56079447","name":"FIL-02 Asc","areaM2":2.02,"station":"ETA GENERAL SAMPAIO","location":"GENERAL SAMPAIO","businessUnit":"UN-BCL"},{"id":"ede53419","name":"FIL-03 Asc","areaM2":3.15,"station":"ETA GENERAL SAMPAIO","location":"GENERAL SAMPAIO","businessUnit":"UN-BCL"},{"id":"1d06fc93","name":"FIL-04 Asc","areaM2":3.15,"station":"ETA GENERAL SAMPAIO","location":"GENERAL SAMPAIO","businessUnit":"UN-BCL"},{"id":"5c6f9929","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA GERMINAL","location":"PALMÁCIA","businessUnit":"UN-BMO"},{"id":"639a4b3d","name":"FIL-01 Desc","areaM2":4.91,"station":"ETA GERMINAL","location":"PALMÁCIA","businessUnit":"UN-BMO"},{"id":"307fa8e2","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA GERMINAL","location":"PALMÁCIA","businessUnit":"UN-BMO"},{"id":"9ec66dc5","name":"FIL-02 Desc","areaM2":4.91,"station":"ETA GERMINAL","location":"PALMÁCIA","businessUnit":"UN-BMO"},{"id":"be0fdaa7","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA GRAÇA","location":"GRAÇA","businessUnit":"UN-BSI"},{"id":"1c2b3687","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA GRANJEIRO","location":"GRANJEIRO","businessUnit":"UN-BSA"},{"id":"9a4768da","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA GRANJEIRO","location":"GRANJEIRO","businessUnit":"UN-BSA"},{"id":"019bef00","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA GROAÍRAS","location":"GROAÍRAS","businessUnit":"UN-BAC"},{"id":"1e16635c","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA GROAÍRAS","location":"GROAÍRAS","businessUnit":"UN-BAC"},{"id":"54376061","name":"FIL-03 Asc","areaM2":3.15,"station":"ETA GROAÍRAS","location":"GROAÍRAS","businessUnit":"UN-BAC"},{"id":"9e78951d","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA GROAÍRAS","location":"GROAÍRAS","businessUnit":"UN-BAC"},{"id":"1440ffac","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA GUAIÚBA","location":"GUAIÚBA","businessUnit":"UN-BMO"},{"id":"1ad8986c","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA GUAIÚBA","location":"GUAIÚBA","businessUnit":"UN-BMO"},{"id":"72a86cca","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA GUAIÚBA","location":"GUAIÚBA","businessUnit":"UN-BMO"},{"id":"31b67e28","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA GUAIÚBA","location":"GUAIÚBA","businessUnit":"UN-BMO"},{"id":"3d93a9a1","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA GUAIÚBA","location":"GUAIÚBA","businessUnit":"UN-BMO"},{"id":"3b4dbba2","name":"FPR-02 Desc","areaM2":4.91,"station":"ETA GUAIÚBA","location":"GUAIÚBA","businessUnit":"UN-BMO"},{"id":"c54b0633","name":"FIL-01 Desc","areaM2":3.15,"station":"ETA GUAJIRU","location":"FORTIM","businessUnit":"UN-BBJ"},{"id":"f007bca0","name":"FIL-02 Desc","areaM2":3.15,"station":"ETA GUAJIRU","location":"FORTIM","businessUnit":"UN-BBJ"},{"id":"3613c21e","name":"FIL-01 Asc","areaM2":4.72,"station":"ETA GUASSUSSÊ","location":"ORÓS","businessUnit":"UN-BAJ"},{"id":"4e2dd0ef","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"d0ec48af","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"7afeb987","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"1646bd12","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"88b1fa1e","name":"FIL-05 Asc","areaM2":12.57,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"e0e251dc","name":"FIL-06 Asc","areaM2":12.57,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"b3a66674","name":"FIL-07 Asc","areaM2":12.57,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"92f05102","name":"FIL-08 Asc","areaM2":12.92,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"3987c260","name":"FIL-09 Asc","areaM2":12.92,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"ada83ff0","name":"FIL-10 Asc","areaM2":12.92,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"26dd80a9","name":"FIL-11 Asc","areaM2":12.92,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"0d756e0f","name":"FIL-12 Asc","areaM2":12.92,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"0681b6dd","name":"FIL-13 Asc","areaM2":12.92,"station":"ETA HORIZONTE","location":"HORIZONTE","businessUnit":"UN-BML"},{"id":"e461d3b9","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA IARA","location":"BARRO","businessUnit":"UN-BSA"},{"id":"0f523f8e","name":"FIL-02","areaM2":1.77,"station":"ETA IARA","location":"BARRO","businessUnit":"UN-BSA"},{"id":"126479f8","name":"FPR-01 Desc","areaM2":0.29,"station":"ETA IARA","location":"BARRO","businessUnit":"UN-BSA"},{"id":"957f678e","name":"FIL-01","areaM2":7.07,"station":"ETA IBARETAMA","location":"IBARETAMA","businessUnit":"UN-BBA"},{"id":"195361ae","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA IBARETAMA","location":"IBARETAMA","businessUnit":"UN-BBA"},{"id":"9f17b763","name":"FIL-02 Desc","areaM2":7.07,"station":"ETA IBARETAMA","location":"IBARETAMA","businessUnit":"UN-BBA"},{"id":"fb743398","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA IBICUITINGA","location":"IBICUITINGA","businessUnit":"UN-BBA"},{"id":"50fb35d2","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA IBICUITINGA","location":"IBICUITINGA","businessUnit":"UN-BBA"},{"id":"6326126c","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA IBICUITINGA","location":"IBICUITINGA","businessUnit":"UN-BBA"},{"id":"143025de","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA IDEAL","location":"ARACOIABA","businessUnit":"UN-BBA"},{"id":"603ffda2","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA IDEAL","location":"ARACOIABA","businessUnit":"UN-BBA"},{"id":"9c7ff5e1","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA IDEAL","location":"ARACOIABA","businessUnit":"UN-BBA"},{"id":"ab41a71b","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA INDEPENDÊNCIA","location":"INDEPENDÊNCIA","businessUnit":"UN-BSC"},{"id":"faf44399","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA INDEPENDÊNCIA","location":"INDEPENDÊNCIA","businessUnit":"UN-BSC"},{"id":"e9213e91","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA INDEPENDÊNCIA","location":"INDEPENDÊNCIA","businessUnit":"UN-BSC"},{"id":"035d3624","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA INDEPENDÊNCIA","location":"INDEPENDÊNCIA","businessUnit":"UN-BSC"},{"id":"04c74203","name":"FIL-05 Asc","areaM2":4.99,"station":"ETA INDEPENDÊNCIA","location":"INDEPENDÊNCIA","businessUnit":"UN-BSC"},{"id":"8aded96c","name":"FIL-06 Asc","areaM2":4.99,"station":"ETA INDEPENDÊNCIA","location":"INDEPENDÊNCIA","businessUnit":"UN-BSC"},{"id":"a7f0dfcd","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA INGAZEIRAS","location":"AURORA","businessUnit":"UN-BSA"},{"id":"53543755","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA INGAZEIRAS","location":"AURORA","businessUnit":"UN-BSA"},{"id":"327375b8","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA IPAGUAÇU","location":"MASSAPÊ","businessUnit":"UN-BAC"},{"id":"0da53c9e","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA IPAGUAÇU","location":"MASSAPÊ","businessUnit":"UN-BAC"},{"id":"110516f8","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA IPAGUAÇU","location":"MASSAPÊ","businessUnit":"UN-BAC"},{"id":"243bffa9","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA IPAGUAÇU","location":"MASSAPÊ","businessUnit":"UN-BAC"},{"id":"8b58dc01","name":"FIL-05 Asc","areaM2":9.63,"station":"ETA IPAGUAÇU","location":"MASSAPÊ","businessUnit":"UN-BAC"},{"id":"0f4cd44e","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA IPUEIRAS","location":"SOBRAL","businessUnit":"UN-BAC"},{"id":"dfda8af5","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA IPUEIRAS","location":"SOBRAL","businessUnit":"UN-BAC"},{"id":"7e9e7929","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA IRACEMA","location":"IRACEMA","businessUnit":"UN-BBJ"},{"id":"e733e642","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA IRACEMA","location":"IRACEMA","businessUnit":"UN-BBJ"},{"id":"3f5f8c57","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA IRACEMA","location":"IRACEMA","businessUnit":"UN-BBJ"},{"id":"fb4f6e61","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA IRAJÁ","location":"HIDROLÂNDIA","businessUnit":"UN-BAC"},{"id":"1334c67d","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA IRAJÁ","location":"HIDROLÂNDIA","businessUnit":"UN-BAC"},{"id":"b6435f42","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA IRAJÁ","location":"HIDROLÂNDIA","businessUnit":"UN-BAC"},{"id":"90585f07","name":"FIL-04 Desc","areaM2":7.07,"station":"ETA IRAJÁ","location":"HIDROLÂNDIA","businessUnit":"UN-BAC"},{"id":"850d17f4","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA IRAJÁ","location":"HIDROLÂNDIA","businessUnit":"UN-BAC"},{"id":"0a4f3d39","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA IRAUÇUBA","location":"IRAUÇUBA","businessUnit":"UN-BCL"},{"id":"83d11f8c","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA IRAUÇUBA","location":"IRAUÇUBA","businessUnit":"UN-BCL"},{"id":"66bd6a6d","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA IRAUÇUBA","location":"IRAUÇUBA","businessUnit":"UN-BCL"},{"id":"028aa594","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA IRAUÇUBA","location":"IRAUÇUBA","businessUnit":"UN-BCL"},{"id":"26f69c08","name":"FIL-05 Asc","areaM2":4.91,"station":"ETA IRAUÇUBA","location":"IRAUÇUBA","businessUnit":"UN-BCL"},{"id":"8da50bc2","name":"FIL-06 Asc","areaM2":4.91,"station":"ETA IRAUÇUBA","location":"IRAUÇUBA","businessUnit":"UN-BCL"},{"id":"cb06c91e","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA ITAIÇABA","location":"ITAIÇABA","businessUnit":"UN-BBJ"},{"id":"4394a02e","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA ITAIÇABA","location":"ITAIÇABA","businessUnit":"UN-BBJ"},{"id":"798fba3d","name":"FIL-03 Desc","areaM2":7.07,"station":"ETA ITAIÇABA","location":"ITAIÇABA","businessUnit":"UN-BBJ"},{"id":"51c2b73f","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA ITAIÇABA","location":"ITAIÇABA","businessUnit":"UN-BBJ"},{"id":"aec6d3bf","name":"FIL-05 Asc","areaM2":4.91,"station":"ETA ITAIÇABA","location":"ITAIÇABA","businessUnit":"UN-BBJ"},{"id":"9d507587","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA ITAITINGA","location":"ITAITINGA","businessUnit":"UN-BML"},{"id":"8dcfeda5","name":"FIL-02 Asc","areaM2":9.63,"station":"ETA ITAITINGA","location":"ITAITINGA","businessUnit":"UN-BML"},{"id":"1e2edc26","name":"FIL-03 Asc","areaM2":9.63,"station":"ETA ITAITINGA","location":"ITAITINGA","businessUnit":"UN-BML"},{"id":"95653b6f","name":"FIL-04 Asc","areaM2":9.63,"station":"ETA ITAITINGA","location":"ITAITINGA","businessUnit":"UN-BML"},{"id":"01d606a0","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA ITAPEBUSSU","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"9c2ef1b6","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA ITAPEBUSSU","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"1b7e88aa","name":"FIL-01 Asc","areaM2":10.01,"station":"ETA ITAPIUNA","location":"ITAPIÚNA","businessUnit":"UN-BBA"},{"id":"83041427","name":"FIL-02 Asc","areaM2":10.01,"station":"ETA ITAPIUNA","location":"ITAPIÚNA","businessUnit":"UN-BBA"},{"id":"b8689d54","name":"FIL-03 Asc","areaM2":10.01,"station":"ETA ITAPIUNA","location":"ITAPIÚNA","businessUnit":"UN-BBA"},{"id":"4ff4fc80","name":"FIL-01 Desc","areaM2":39.57,"station":"ETA JABURU","location":"TIANGUÁ","businessUnit":"UN-BSI"},{"id":"d2cb31d2","name":"FIL-02 Desc","areaM2":39.57,"station":"ETA JABURU","location":"TIANGUÁ","businessUnit":"UN-BSI"},{"id":"bdd98d4a","name":"FIL-03 Desc","areaM2":39.57,"station":"ETA JABURU","location":"TIANGUÁ","businessUnit":"UN-BSI"},{"id":"9c5f73c1","name":"FIL-04 Desc","areaM2":39.57,"station":"ETA JABURU","location":"TIANGUÁ","businessUnit":"UN-BSI"},{"id":"1f0034d1","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA JAGUARETAMA","location":"JAGUARETAMA","businessUnit":"UN-BBA"},{"id":"4a280d69","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA JAGUARETAMA","location":"JAGUARETAMA","businessUnit":"UN-BBA"},{"id":"4fa65ecd","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA JAGUARETAMA","location":"JAGUARETAMA","businessUnit":"UN-BBA"},{"id":"cbcc63b0","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA JAGUARIBARA","location":"JAGUARIBARA","businessUnit":"UN-BBJ"},{"id":"d32145d6","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA JAGUARIBARA","location":"JAGUARIBARA","businessUnit":"UN-BBJ"},{"id":"eda239fa","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA JAGUARIBARA","location":"JAGUARIBARA","businessUnit":"UN-BBJ"},{"id":"9218bcfb","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA JAGUARUANA","location":"JAGUARUANA","businessUnit":"UN-BBJ"},{"id":"1509dbc9","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA JAGUARUANA","location":"JAGUARUANA","businessUnit":"UN-BBJ"},{"id":"9233e99d","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA JAGUARUANA","location":"JAGUARUANA","businessUnit":"UN-BBJ"},{"id":"367346a0","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA JAIBARAS","location":"SOBRAL","businessUnit":"UN-BAC"},{"id":"42a23574","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA JAIBARAS","location":"SOBRAL","businessUnit":"UN-BAC"},{"id":"187867b6","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA JAIBARAS","location":"SOBRAL","businessUnit":"UN-BAC"},{"id":"b0544bb3","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA JAIBARAS","location":"SOBRAL","businessUnit":"UN-BAC"},{"id":"803e75ca","name":"FIL-05 Desc","areaM2":4.91,"station":"ETA JAIBARAS","location":"SOBRAL","businessUnit":"UN-BAC"},{"id":"b36e63e3","name":"FIL-06 Desc","areaM2":4.91,"station":"ETA JAIBARAS","location":"SOBRAL","businessUnit":"UN-BAC"},{"id":"461650ee","name":"FIL-01 Asc","areaM2":2.41,"station":"ETA JARDIM SÃO JOSE","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"03abcc65","name":"FIL-02 Asc","areaM2":2.41,"station":"ETA JARDIM SÃO JOSE","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"dc618c36","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA JERICOACOARA","location":"JIJOCA DE JERICOACOARA","businessUnit":"UN-BAC"},{"id":"fea2837a","name":"FIL-01 Desc","areaM2":1.77,"station":"ETA JUATAMA","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"916d33eb","name":"FIL-02 Desc","areaM2":1.77,"station":"ETA JUATAMA","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"de1bc0ed","name":"FIL-03 Desc","areaM2":1.77,"station":"ETA JUATAMA","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"60edc419","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA LAGOA DA CRUZ","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"5de64631","name":"FIL-02 Asc","areaM2":1.77,"station":"ETA LAGOA DA CRUZ","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"b0be16a8","name":"FIL-03 Asc","areaM2":3.15,"station":"ETA LAGOA DA CRUZ","location":"ITAPIPOCA","businessUnit":"UN-BCL"},{"id":"c8af0531","name":"FIL-01 Asc","areaM2":null,"station":"ETA LAGOA DO MATO","location":"ITATIRA","businessUnit":"UN-BBA"},{"id":"55bd7ee7","name":"FIL-02 Asc","areaM2":null,"station":"ETA LAGOA DO MATO","location":"ITATIRA","businessUnit":"UN-BBA"},{"id":"d21d3061","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA LISIEUX","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"76ff79c0","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA LISIEUX","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"5723b6b0","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA MACARAÚ","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"73d94637","name":"FIL-01 Asc","areaM2":12.57,"station":"ETA MARANGUAPE","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"9dabf7d4","name":"FIL-02 Asc","areaM2":12.57,"station":"ETA MARANGUAPE","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"8e7a336b","name":"FIL-03 Asc","areaM2":12.57,"station":"ETA MARANGUAPE","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"8498df6c","name":"FIL-04 Asc","areaM2":12.57,"station":"ETA MARANGUAPE","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"cd090d44","name":"FIL-05 Asc","areaM2":12.57,"station":"ETA MARANGUAPE","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"69e03fae","name":"FIL-06 Asc","areaM2":12.57,"station":"ETA MARANGUAPE","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"de879059","name":"FIL-07","areaM2":7.07,"station":"ETA MARANGUAPE","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"e42a4166","name":"FIL-08 Asc","areaM2":9.63,"station":"ETA MARANGUAPE","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"0f32953f","name":"FIL-01 Desc","areaM2":1.77,"station":"ETA MARRUÁS DOS ROSAS","location":"PIRES FERREIRA","businessUnit":"UN-BSI"},{"id":"0f5fbe2c","name":"FIL-02 Desc","areaM2":1.77,"station":"ETA MARRUÁS DOS ROSAS","location":"PIRES FERREIRA","businessUnit":"UN-BSI"},{"id":"e8395610","name":"FIL-03 Desc","areaM2":1.77,"station":"ETA MARRUÁS DOS ROSAS","location":"PIRES FERREIRA","businessUnit":"UN-BSI"},{"id":"e6380fd8","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA MARTINÓPOLE","location":"MARTINÓPOLE","businessUnit":"UN-BAC"},{"id":"6bea4da2","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA MARTINÓPOLE","location":"MARTINÓPOLE","businessUnit":"UN-BAC"},{"id":"23aba7e0","name":"FIL-03 Desc","areaM2":7.07,"station":"ETA MARTINÓPOLE","location":"MARTINÓPOLE","businessUnit":"UN-BAC"},{"id":"57bedeb2","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA MERUOCA","location":"MERUOCA","businessUnit":"UN-BAC"},{"id":"23e59ba6","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA MERUOCA","location":"MERUOCA","businessUnit":"UN-BAC"},{"id":"27c1a27c","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA MIRAÍMA","location":"MIRAÍMA","businessUnit":"UN-BCL"},{"id":"80c717d2","name":"FIL-02 Asc","areaM2":1.77,"station":"ETA MIRAÍMA","location":"MIRAÍMA","businessUnit":"UN-BCL"},{"id":"dbf59180","name":"FIL-03 Asc","areaM2":1.77,"station":"ETA MIRAÍMA","location":"MIRAÍMA","businessUnit":"UN-BCL"},{"id":"ec10c80a","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA MIRAÍMA","location":"MIRAÍMA","businessUnit":"UN-BCL"},{"id":"5308dd7b","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA MISSÃO VELHA","location":"MISSÃO VELHA","businessUnit":"UN-BSA"},{"id":"4c07677c","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA MISSÃO VELHA","location":"MISSÃO VELHA","businessUnit":"UN-BSA"},{"id":"cfed437d","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA MISSÃO VELHA","location":"MISSÃO VELHA","businessUnit":"UN-BSA"},{"id":"5f927894","name":"FIL-01 Asc","areaM2":4.09,"station":"ETA MOMBAÇA","location":"MOMBAÇA","businessUnit":"UN-BBA"},{"id":"721a04e5","name":"FIL-02 Asc","areaM2":4.09,"station":"ETA MOMBAÇA","location":"MOMBAÇA","businessUnit":"UN-BBA"},{"id":"fae139ef","name":"FIL-03 Asc","areaM2":4.09,"station":"ETA MOMBAÇA","location":"MOMBAÇA","businessUnit":"UN-BBA"},{"id":"01e3863e","name":"FIL-04 Asc","areaM2":4.09,"station":"ETA MOMBAÇA","location":"MOMBAÇA","businessUnit":"UN-BBA"},{"id":"473431bd","name":"FIL-05 Asc","areaM2":4.09,"station":"ETA MOMBAÇA","location":"MOMBAÇA","businessUnit":"UN-BBA"},{"id":"3255fdff","name":"FIL-06 Asc","areaM2":4.09,"station":"ETA MOMBAÇA","location":"MOMBAÇA","businessUnit":"UN-BBA"},{"id":"35d9c065","name":"FPR-01 Asc","areaM2":4.91,"station":"ETA MOMBAÇA","location":"MOMBAÇA","businessUnit":"UN-BBA"},{"id":"4f99a945","name":"FPR-02 Asc","areaM2":4.91,"station":"ETA MOMBAÇA","location":"MOMBAÇA","businessUnit":"UN-BBA"},{"id":"0769a246","name":"FIL-01 Asc","areaM2":4.99,"station":"ETA MONSENHOR TABOSA","location":"MONSENHOR TABOSA","businessUnit":"UN-BSC"},{"id":"86e5f5d3","name":"FIL-02 Asc","areaM2":4.99,"station":"ETA MONSENHOR TABOSA","location":"MONSENHOR TABOSA","businessUnit":"UN-BSC"},{"id":"a56b0ea4","name":"FIL-03 Asc","areaM2":4.99,"station":"ETA MONSENHOR TABOSA","location":"MONSENHOR TABOSA","businessUnit":"UN-BSC"},{"id":"9ddadea6","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA MONSENHOR TABOSA","location":"MONSENHOR TABOSA","businessUnit":"UN-BSC"},{"id":"31490cae","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA MORAÚJO","location":"MORAÚJO","businessUnit":"UN-BAC"},{"id":"7dae4700","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA MORRINHOS","location":"MORRINHOS","businessUnit":"UN-BAC"},{"id":"4fffacfb","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA MORRINHOS","location":"MORRINHOS","businessUnit":"UN-BAC"},{"id":"133bc711","name":"FIL-03","areaM2":4.91,"station":"ETA MORRINHOS","location":"MORRINHOS","businessUnit":"UN-BAC"},{"id":"260a9932","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA MUCAMBO","location":"MUCAMBO","businessUnit":"UN-BSI"},{"id":"f22b3deb","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA MUCAMBO","location":"MUCAMBO","businessUnit":"UN-BSI"},{"id":"12f76fdd","name":"FIL-01 Asc","areaM2":2.27,"station":"ETA MULUNGU","location":"MULUNGU","businessUnit":"UN-BMO"},{"id":"755202a7","name":"FIL-02 Asc","areaM2":2.27,"station":"ETA MULUNGU","location":"MULUNGU","businessUnit":"UN-BMO"},{"id":"84477058","name":"FPR-01 Desc","areaM2":null,"station":"ETA MUNDAÚ","location":"TRAIRI","businessUnit":"UN-BCL"},{"id":"9cb8d2e7","name":"FPR-02 Desc","areaM2":null,"station":"ETA MUNDAÚ","location":"TRAIRI","businessUnit":"UN-BCL"},{"id":"4116d36d","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA NOVO ORIENTE","location":"NOVO ORIENTE","businessUnit":"UN-BSC"},{"id":"877bf214","name":"FIL-02 Asc","areaM2":9.63,"station":"ETA NOVO ORIENTE","location":"NOVO ORIENTE","businessUnit":"UN-BSC"},{"id":"ab010ecc","name":"FIL-03 Asc","areaM2":9.63,"station":"ETA NOVO ORIENTE","location":"NOVO ORIENTE","businessUnit":"UN-BSC"},{"id":"8ffe8615","name":"FIL-04 Asc","areaM2":9.63,"station":"ETA NOVO ORIENTE","location":"NOVO ORIENTE","businessUnit":"UN-BSC"},{"id":"d8f2b5cd","name":"FIL-05 Asc","areaM2":9.63,"station":"ETA NOVO ORIENTE","location":"NOVO ORIENTE","businessUnit":"UN-BSC"},{"id":"a01fcb0d","name":"FIL-06 Asc","areaM2":9.63,"station":"ETA NOVO ORIENTE","location":"NOVO ORIENTE","businessUnit":"UN-BSC"},{"id":"a839b24c","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA NOVO ORIENTE","location":"NOVO ORIENTE","businessUnit":"UN-BSC"},{"id":"f8094902","name":"FPR-02 Desc","areaM2":4.91,"station":"ETA NOVO ORIENTE","location":"NOVO ORIENTE","businessUnit":"UN-BSC"},{"id":"1d95f5f6","name":"FIL-01 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"cd1c4f6a","name":"FIL-01 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"fbd1f7eb","name":"FIL-02 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"3a5fd1bd","name":"FIL-02 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"b9789330","name":"FIL-03 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"9d186525","name":"FIL-03 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"8c0e1332","name":"FIL-04 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"4a9c8118","name":"FIL-04 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"0bedb604","name":"FIL-05 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"3fcfed40","name":"FIL-05 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"3c8568d5","name":"FIL-06 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"af9fc8f8","name":"FIL-06 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"959a661a","name":"FIL-07 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"bbcb693e","name":"FIL-07 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"9d421dad","name":"FIL-08 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"16ba5009","name":"FIL-08 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"e4a1dfd4","name":"FIL-09 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"2a40fff2","name":"FIL-09 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"0133bc14","name":"FIL-10 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"ff83f97e","name":"FIL-10 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"9c0a7468","name":"FIL-11 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"e15cbc46","name":"FIL-11 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"6fad0b83","name":"FIL-12 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"fae8ee00","name":"FIL-12 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"8891ee73","name":"FIL-13 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"1df4ecdb","name":"FIL-13 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"98505764","name":"FIL-14 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"fb2b8de2","name":"FIL-14 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"8bdfb2c7","name":"FIL-15 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"cba638e3","name":"FIL-15 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"e8c7dc2b","name":"FIL-16 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"8810c624","name":"FIL-16 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"ee46293c","name":"FIL-17 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"766dbed1","name":"FIL-17 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"9534082c","name":"FIL-18 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"7ced028a","name":"FIL-18 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"29892c26","name":"FIL-19 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"b6f05e74","name":"FIL-19 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"d2e6aed8","name":"FIL-20 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"f8f23888","name":"FIL-20 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"48e2caeb","name":"FIL-21 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"353a5fab","name":"FIL-21 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"66aa4065","name":"FIL-22 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"2bdf6423","name":"FIL-22 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"de9e06d2","name":"FIL-23 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"a91bea24","name":"FIL-23 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"80d39498","name":"FIL-24 Asc","areaM2":102,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"4f911364","name":"FIL-24 Desc","areaM2":76,"station":"ETA OESTE","location":"CAUCAIA","businessUnit":"UN-MPA"},{"id":"6ffacc0b","name":"FIL-01 Asc","areaM2":6.58,"station":"ETA OROS","location":"ORÓS","businessUnit":"UN-BAJ"},{"id":"8af30864","name":"FIL-02 Asc","areaM2":7.03,"station":"ETA OROS","location":"ORÓS","businessUnit":"UN-BAJ"},{"id":"3cc11d4d","name":"FIL-03 Asc","areaM2":7.03,"station":"ETA OROS","location":"ORÓS","businessUnit":"UN-BAJ"},{"id":"e4692c41","name":"FIL-04 Asc","areaM2":7.03,"station":"ETA OROS","location":"ORÓS","businessUnit":"UN-BAJ"},{"id":"55fe4dc2","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA PACATUBA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"ec9c1981","name":"FIL-02 Asc","areaM2":9.63,"station":"ETA PACATUBA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"d2811d22","name":"FPR-01 Desc","areaM2":22.91,"station":"ETA PACATUBA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"307403cd","name":"FPR-02 Desc","areaM2":22.91,"station":"ETA PACATUBA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"365cf886","name":"FPR-03 Desc","areaM2":22.91,"station":"ETA PACATUBA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"8fcac02d","name":"FPR-04 Desc","areaM2":22.91,"station":"ETA PACATUBA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"44e3970c","name":"FPR-05 Desc","areaM2":22.91,"station":"ETA PACATUBA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"4d0883da","name":"FPR-06 Desc","areaM2":22.91,"station":"ETA PACATUBA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"7e00c1d8","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA PACOTI","location":"PACOTI","businessUnit":"UN-BMO"},{"id":"24950103","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA PACOTI","location":"PACOTI","businessUnit":"UN-BMO"},{"id":"d32a0dd9","name":"FIL-01 Asc","areaM2":5.99,"station":"ETA PACUJÁ","location":"PACUJÁ","businessUnit":"UN-BSI"},{"id":"aae0a450","name":"FIL-02 Asc","areaM2":7.03,"station":"ETA PACUJÁ","location":"PACUJÁ","businessUnit":"UN-BSI"},{"id":"72bc6770","name":"FIL-03 Asc","areaM2":7.03,"station":"ETA PACUJÁ","location":"PACUJÁ","businessUnit":"UN-BSI"},{"id":"d76a5b74","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA PALESTINA DO ORÓS","location":"ORÓS","businessUnit":"UN-BAJ"},{"id":"1474b30a","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA PALHANO","location":"PALHANO","businessUnit":"UN-BBJ"},{"id":"25c9ed64","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA PALHANO","location":"PALHANO","businessUnit":"UN-BBJ"},{"id":"4866c067","name":"FIL-01 Desc","areaM2":1,"station":"ETA PARAIPABA","location":"PARAIPABA","businessUnit":"UN-BCL"},{"id":"b157e00e","name":"FIL-02 Desc","areaM2":1,"station":"ETA PARAIPABA","location":"PARAIPABA","businessUnit":"UN-BCL"},{"id":"68982890","name":"FIL-03 Desc","areaM2":1,"station":"ETA PARAIPABA","location":"PARAIPABA","businessUnit":"UN-BCL"},{"id":"5425a598","name":"FIL-04 Desc","areaM2":1,"station":"ETA PARAIPABA","location":"PARAIPABA","businessUnit":"UN-BCL"},{"id":"312d756b","name":"FIL-05 Desc","areaM2":1,"station":"ETA PARAIPABA","location":"PARAIPABA","businessUnit":"UN-BCL"},{"id":"4728a4a1","name":"FIL-06 Desc","areaM2":1,"station":"ETA PARAIPABA","location":"PARAIPABA","businessUnit":"UN-BCL"},{"id":"93449cc5","name":"FIL-07 Desc","areaM2":1,"station":"ETA PARAIPABA","location":"PARAIPABA","businessUnit":"UN-BCL"},{"id":"de8fe4f4","name":"FIL-08 Desc","areaM2":1,"station":"ETA PARAIPABA","location":"PARAIPABA","businessUnit":"UN-BCL"},{"id":"29c71f8b","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA PARAMBU","location":"PARAMBU","businessUnit":"UN-BAJ"},{"id":"e0ecb552","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA PARAMBU","location":"PARAMBU","businessUnit":"UN-BAJ"},{"id":"4678aa7d","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA PARAMOTI","location":"PARAMOTI","businessUnit":"UN-BBA"},{"id":"55a0cd6e","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA PARAMOTI","location":"PARAMOTI","businessUnit":"UN-BBA"},{"id":"59f020fe","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA PARAMOTI","location":"PARAMOTI","businessUnit":"UN-BBA"},{"id":"859a61a1","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA PAVUNA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"0b7e1b26","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA PAVUNA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"516e9cf6","name":"FIL-03 Asc","areaM2":9.63,"station":"ETA PAVUNA","location":"PACATUBA","businessUnit":"UN-BMO"},{"id":"8fb5fe03","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA PECÉM","location":"SÃO GONÇALO DO AMARANTE","businessUnit":"UN-BCL"},{"id":"f6b05c8b","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA PECÉM","location":"SÃO GONÇALO DO AMARANTE","businessUnit":"UN-BCL"},{"id":"8f0be4b1","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA PECÉM","location":"SÃO GONÇALO DO AMARANTE","businessUnit":"UN-BCL"},{"id":"c836187c","name":"FIL-01 Asc","areaM2":16,"station":"ETA PENTECOSTE","location":"PENTECOSTE","businessUnit":"UN-BCL"},{"id":"355d50e5","name":"FIL-02 Asc","areaM2":16,"station":"ETA PENTECOSTE","location":"PENTECOSTE","businessUnit":"UN-BCL"},{"id":"45df4231","name":"FIL-03 Asc","areaM2":16,"station":"ETA PENTECOSTE","location":"PENTECOSTE","businessUnit":"UN-BCL"},{"id":"dd8fe323","name":"FIL-04 Asc","areaM2":16,"station":"ETA PENTECOSTE","location":"PENTECOSTE","businessUnit":"UN-BCL"},{"id":"4c875394","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA PEREIRO","location":"PEREIRO","businessUnit":"UN-BBJ"},{"id":"82886077","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA PEREIRO","location":"PEREIRO","businessUnit":"UN-BBJ"},{"id":"b835205e","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA PIQUET CARNEIRO","location":"PIQUET CARNEIRO","businessUnit":"UN-BBA"},{"id":"8eba69ea","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA PIQUET CARNEIRO","location":"PIQUET CARNEIRO","businessUnit":"UN-BBA"},{"id":"119fa1a3","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA PIQUET CARNEIRO","location":"PIQUET CARNEIRO","businessUnit":"UN-BBA"},{"id":"c770ab30","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA POTENGI","location":"POTENGI","businessUnit":"UN-BAJ"},{"id":"12cd9ed6","name":"FIL-01 Desc","areaM2":19.81,"station":"ETA POTY","location":"CRATEÚS","businessUnit":"UN-BSC"},{"id":"f38f9abd","name":"FIL-02 Desc","areaM2":19.81,"station":"ETA POTY","location":"CRATEÚS","businessUnit":"UN-BSC"},{"id":"ec30b551","name":"FIL-03 Desc","areaM2":19.81,"station":"ETA POTY","location":"CRATEÚS","businessUnit":"UN-BSC"},{"id":"68e322e8","name":"FIL-04 Desc","areaM2":19.81,"station":"ETA POTY","location":"CRATEÚS","businessUnit":"UN-BSC"},{"id":"051b41b2","name":"FIL-05 Desc","areaM2":19.81,"station":"ETA POTY","location":"CRATEÚS","businessUnit":"UN-BSC"},{"id":"e842af02","name":"FIL-06 Desc","areaM2":19.81,"station":"ETA POTY","location":"CRATEÚS","businessUnit":"UN-BSC"},{"id":"b3bb9015","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA PRIMAVERA","location":"CAUCAIA","businessUnit":"UN-BCL"},{"id":"f99d5da3","name":"FIL-02 Desc","areaM2":3.15,"station":"ETA PRIMAVERA","location":"CAUCAIA","businessUnit":"UN-BCL"},{"id":"c902f3a5","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA QUITERIANÓPOLIS","location":"QUITERIANÓPOLIS","businessUnit":"UN-BSC"},{"id":"9d11c84c","name":"FIL-02 Asc","areaM2":6.16,"station":"ETA QUITERIANÓPOLIS","location":"QUITERIANÓPOLIS","businessUnit":"UN-BSC"},{"id":"5c89acd6","name":"FIL-03 Asc","areaM2":6.16,"station":"ETA QUITERIANÓPOLIS","location":"QUITERIANÓPOLIS","businessUnit":"UN-BSC"},{"id":"c016d5cd","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA QUITERIANÓPOLIS","location":"QUITERIANÓPOLIS","businessUnit":"UN-BSC"},{"id":"54e81ea2","name":"FIL-01 Asc","areaM2":15.05,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"9a2178ad","name":"FIL-02 Asc","areaM2":15.05,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"9d16142c","name":"FIL-03 Asc","areaM2":15.05,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"cc761bef","name":"FIL-04 Asc","areaM2":15.05,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"80da7e4c","name":"FIL-05 Asc","areaM2":15.05,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"7c3cf446","name":"FIL-06 Asc","areaM2":15.05,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"dcf50234","name":"FIL-07 Desc","areaM2":null,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"aaa68bbb","name":"FIL-08 Desc","areaM2":null,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"e76a98fe","name":"FIL-09 Desc","areaM2":null,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"b8a3da61","name":"FIL-10 Desc","areaM2":null,"station":"ETA QUIXADÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"563c9731","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA QUIXERÉ","location":"QUIXERÉ","businessUnit":"UN-BBJ"},{"id":"c9dae127","name":"FIL-02 Desc","areaM2":7.07,"station":"ETA QUIXERÉ","location":"QUIXERÉ","businessUnit":"UN-BBJ"},{"id":"1a404aa9","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"954a0eab","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"18ae21cc","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"5cab6622","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"6b81ddf5","name":"FIL-05 Asc","areaM2":7.07,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"764da3b4","name":"FIL-06 Asc","areaM2":7.07,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"4925d7a5","name":"FIL-07 Asc","areaM2":7.07,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"60807f4d","name":"FIL-08 Asc","areaM2":15.56,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"fdf07d80","name":"FIL-09 Asc","areaM2":4.91,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"6b7790fd","name":"FIL-10 Asc","areaM2":4.91,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"66959c16","name":"FIL-11 Asc","areaM2":4.91,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"975b1624","name":"FIL-12 Asc","areaM2":4.91,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"0cc22413","name":"FPR-01 Desc","areaM2":1.77,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"971b75be","name":"FPR-02 Desc","areaM2":1.77,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"b6eb2846","name":"FPR-03 Desc","areaM2":1.77,"station":"ETA REDENÇÃO","location":"REDENÇÃO","businessUnit":"UN-BMO"},{"id":"94998a14","name":"FIL-01 Asc","areaM2":15.91,"station":"ETA RUSSAS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"0f925f79","name":"FIL-02 Asc","areaM2":15.91,"station":"ETA RUSSAS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"6fa14f7c","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA RUSSAS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"895cbbb4","name":"FIL-04 Asc","areaM2":9.63,"station":"ETA RUSSAS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"821a41c9","name":"FIL-05 Asc","areaM2":15.91,"station":"ETA RUSSAS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"4f21e252","name":"FIL-06 Asc","areaM2":15.91,"station":"ETA RUSSAS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"cdc62c3a","name":"FIL-07 Asc","areaM2":15.91,"station":"ETA RUSSAS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"7ae97080","name":"FIL-08 Asc","areaM2":15.91,"station":"ETA RUSSAS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"2eb2ff7d","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA SABOEIRO","location":"SABOEIRO","businessUnit":"UN-BAJ"},{"id":"2ba986d9","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA SABOEIRO","location":"SABOEIRO","businessUnit":"UN-BAJ"},{"id":"cc154ea5","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA SANTA QUITÉRIA","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"8f44ec2b","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA SANTA QUITÉRIA","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"6f1d8c18","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA SANTA QUITÉRIA","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"bf4210cb","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA SANTA QUITÉRIA","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"2fc30e19","name":"FIL-05 Asc","areaM2":4.91,"station":"ETA SANTA QUITÉRIA","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"f631f434","name":"FIL-06 Asc","areaM2":4.91,"station":"ETA SANTA QUITÉRIA","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"7222930a","name":"FPR-01 Desc","areaM2":4.91,"station":"ETA SANTA QUITÉRIA","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"c71f8c78","name":"FPR-02 Desc","areaM2":4.91,"station":"ETA SANTA QUITÉRIA","location":"SANTA QUITÉRIA","businessUnit":"UN-BAC"},{"id":"94121da8","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA SANTANA DO ACARAÚ","location":"SANTANA DO ACARAÚ","businessUnit":"UN-BAC"},{"id":"d3a4d600","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA SANTANA DO ACARAÚ","location":"SANTANA DO ACARAÚ","businessUnit":"UN-BAC"},{"id":"af6e581c","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA SANTANA DO ACARAÚ","location":"SANTANA DO ACARAÚ","businessUnit":"UN-BAC"},{"id":"620e96a8","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA SANTANA DO ACARAÚ","location":"SANTANA DO ACARAÚ","businessUnit":"UN-BAC"},{"id":"338958ce","name":"FPR-01 Desc","areaM2":0.45,"station":"ETA SÃO JOAO DE DEUS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"c38b61f1","name":"FPR-02 Desc","areaM2":0.45,"station":"ETA SÃO JOAO DE DEUS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"211dbf85","name":"FPR-03 Desc","areaM2":0.45,"station":"ETA SÃO JOAO DE DEUS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"04d3b1bb","name":"FPR-04 Desc","areaM2":0.45,"station":"ETA SÃO JOAO DE DEUS","location":"RUSSAS","businessUnit":"UN-BBJ"},{"id":"baa99000","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA SÃO JOAQUIM","location":"UMIRIM","businessUnit":"UN-BCL"},{"id":"80f8af00","name":"FIL-02 Asc","areaM2":1.77,"station":"ETA SÃO JOAQUIM","location":"UMIRIM","businessUnit":"UN-BCL"},{"id":"f8323a33","name":"FIL-03 Desc","areaM2":3.15,"station":"ETA SÃO JOAQUIM","location":"UMIRIM","businessUnit":"UN-BCL"},{"id":"02a13eb9","name":"FIL-04 Desc","areaM2":1.77,"station":"ETA SÃO JOAQUIM","location":"UMIRIM","businessUnit":"UN-BCL"},{"id":"ba7797d8","name":"FIL-01 Asc","areaM2":6.01,"station":"ETA SÃO LUIS DO CURU","location":"SÃO LUÍS DO CURU","businessUnit":"UN-BCL"},{"id":"d7fd92b3","name":"FIL-02 Asc","areaM2":6.21,"station":"ETA SÃO LUIS DO CURU","location":"SÃO LUÍS DO CURU","businessUnit":"UN-BCL"},{"id":"8388dfc8","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA SÃO LUIS DO CURU","location":"SÃO LUÍS DO CURU","businessUnit":"UN-BCL"},{"id":"5d30286c","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA SÃO LUIS DO CURU","location":"SÃO LUÍS DO CURU","businessUnit":"UN-BCL"},{"id":"4d283407","name":"FIL-01 Asc","areaM2":10.89,"station":"ETA SAPUPARA","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"8ca3819a","name":"FIL-02 Asc","areaM2":10.89,"station":"ETA SAPUPARA","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"6d2e53b2","name":"FIL-03 Desc","areaM2":10.89,"station":"ETA SAPUPARA","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"15747cf7","name":"FIL-04 Desc","areaM2":10.89,"station":"ETA SAPUPARA","location":"MARANGUAPE","businessUnit":"UN-BMO"},{"id":"d2bbf56b","name":"FPR-01 Desc","areaM2":0.79,"station":"ETA SEBASTIÃO DE ABREU","location":"PENTECOSTE","businessUnit":"UN-BCL"},{"id":"fc8754dd","name":"FPR-02 Desc","areaM2":1.14,"station":"ETA SEBASTIÃO DE ABREU","location":"PENTECOSTE","businessUnit":"UN-BCL"},{"id":"8495c239","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA SENADOR POMPEU","location":"SENADOR POMPEU","businessUnit":"UN-BBA"},{"id":"19de0d52","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA SENADOR POMPEU","location":"SENADOR POMPEU","businessUnit":"UN-BBA"},{"id":"338dbcda","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA SENADOR POMPEU","location":"SENADOR POMPEU","businessUnit":"UN-BBA"},{"id":"2134117a","name":"FIL-01 Desc","areaM2":1.77,"station":"ETA SERRA DO FELIX","location":"BEBERIBE","businessUnit":"UN-BBJ"},{"id":"f0b77fdc","name":"FIL-02 Desc","areaM2":1.77,"station":"ETA SERRA DO FELIX","location":"BEBERIBE","businessUnit":"UN-BBJ"},{"id":"befc91d9","name":"FIL-03 Desc","areaM2":1.77,"station":"ETA SERRA DO FELIX","location":"BEBERIBE","businessUnit":"UN-BBJ"},{"id":"e8dc02f7","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA SÍTIO ALEGRE","location":"MORRINHOS","businessUnit":"UN-BAC"},{"id":"3a89dba8","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA SÍTIOS NOVOS","location":"CAUCAIA","businessUnit":"UN-MTN"},{"id":"3187583c","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA SÍTIOS NOVOS","location":"CAUCAIA","businessUnit":"UN-MTN"},{"id":"8cd11eb8","name":"FPR-01 Desc","areaM2":1.77,"station":"ETA SÍTIOS NOVOS","location":"CAUCAIA","businessUnit":"UN-MTN"},{"id":"662b0d60","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA SIUPÉ","location":"SÃO GONÇALO DO AMARANTE","businessUnit":"UN-BCL"},{"id":"e1dfd33b","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA SIUPÉ","location":"SÃO GONÇALO DO AMARANTE","businessUnit":"UN-BCL"},{"id":"a5661e9d","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA SIUPÉ","location":"SÃO GONÇALO DO AMARANTE","businessUnit":"UN-BCL"},{"id":"f7a78e35","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA SUCESSO","location":"TAMBORIL","businessUnit":"UN-BSC"},{"id":"9a701af2","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA SUCESSO","location":"TAMBORIL","businessUnit":"UN-BSC"},{"id":"dbf9c10d","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA TABULEIRO DO CABREIRO","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"170dc3db","name":"FIL-02 Asc","areaM2":1.77,"station":"ETA TABULEIRO DO CABREIRO","location":"ARACATI","businessUnit":"UN-BBJ"},{"id":"c74fe571","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA TABULEIRO DO NORTE","location":"TABULEIRO DO NORTE","businessUnit":"UN-BBJ"},{"id":"2a93b944","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA TABULEIRO DO NORTE","location":"TABULEIRO DO NORTE","businessUnit":"UN-BBJ"},{"id":"0ac2c0a0","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA TABULEIRO DO NORTE","location":"TABULEIRO DO NORTE","businessUnit":"UN-BBJ"},{"id":"59ed0114","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA TABULEIRO DO NORTE","location":"TABULEIRO DO NORTE","businessUnit":"UN-BBJ"},{"id":"355bc279","name":"FIL-05 Asc","areaM2":7.07,"station":"ETA TABULEIRO DO NORTE","location":"TABULEIRO DO NORTE","businessUnit":"UN-BBJ"},{"id":"ea7c165c","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA TAMBORIL","location":"TAMBORIL","businessUnit":"UN-BSC"},{"id":"bf4553d3","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA TAMBORIL","location":"TAMBORIL","businessUnit":"UN-BSC"},{"id":"8dd1289a","name":"FPR-01 Desc","areaM2":2.93,"station":"ETA TAMBORIL","location":"TAMBORIL","businessUnit":"UN-BSC"},{"id":"ec41117d","name":"FPR-02 Desc","areaM2":2.93,"station":"ETA TAMBORIL","location":"TAMBORIL","businessUnit":"UN-BSC"},{"id":"46b8a8d0","name":"FTF-01 Desc","areaM2":3.15,"station":"ETA TAMBORIL","location":"TAMBORIL","businessUnit":"UN-BSC"},{"id":"63ee1b05","name":"FTF-02 Desc","areaM2":3.15,"station":"ETA TAMBORIL","location":"TAMBORIL","businessUnit":"UN-BSC"},{"id":"791cf688","name":"FIL-01 Desc","areaM2":3.15,"station":"ETA TAPUIARÁ","location":"QUIXADÁ","businessUnit":"UN-BBA"},{"id":"a0967a61","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA TARRAFAS","location":"TARRAFAS","businessUnit":"UN-BAJ"},{"id":"605c9a01","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA TARRAFAS","location":"TARRAFAS","businessUnit":"UN-BAJ"},{"id":"029ea083","name":"FIL-01 Asc","areaM2":10.76,"station":"ETA TAUÁ","location":"TAUÁ","businessUnit":"UN-BAJ"},{"id":"8d977fb9","name":"FIL-02 Asc","areaM2":10.76,"station":"ETA TAUÁ","location":"TAUÁ","businessUnit":"UN-BAJ"},{"id":"cfa63d34","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA TAUÁ","location":"TAUÁ","businessUnit":"UN-BAJ"},{"id":"0ac9a723","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA TAUÁ","location":"TAUÁ","businessUnit":"UN-BAJ"},{"id":"4a0c1e84","name":"FIL-05 Asc","areaM2":10.76,"station":"ETA TAUÁ","location":"TAUÁ","businessUnit":"UN-BAJ"},{"id":"e29fa40e","name":"FIL-06 Asc","areaM2":10.76,"station":"ETA TAUÁ","location":"TAUÁ","businessUnit":"UN-BAJ"},{"id":"dbd2b53a","name":"FIL-07 Asc","areaM2":10.18,"station":"ETA TAUÁ","location":"TAUÁ","businessUnit":"UN-BAJ"},{"id":"6016cd47","name":"FIL-01 Asc","areaM2":9.63,"station":"ETA TEJUÇUOCA","location":"TEJUÇUOCA","businessUnit":"UN-BCL"},{"id":"068f4225","name":"FPR-01 Asc","areaM2":null,"station":"ETA TEJUÇUOCA","location":"TEJUÇUOCA","businessUnit":"UN-BCL"},{"id":"0a4bb0cb","name":"FIL-01 Asc","areaM2":1.77,"station":"ETA TOMÉ AFONSO","location":"ITAIÇABA","businessUnit":"UN-BBJ"},{"id":"f3bf3dec","name":"FIL-01 Asc","areaM2":3.15,"station":"ETA TRAIRI","location":"TRAIRI","businessUnit":"UN-BCL"},{"id":"69def2bf","name":"FIL-02 Asc","areaM2":3.15,"station":"ETA TRAIRI","location":"TRAIRI","businessUnit":"UN-BCL"},{"id":"ed596db6","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA TRAIRI","location":"TRAIRI","businessUnit":"UN-BCL"},{"id":"370e4d39","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA TRAIRI","location":"TRAIRI","businessUnit":"UN-BCL"},{"id":"0dc8940d","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA TRIÂNGULO","location":"CHOROZINHO","businessUnit":"UN-BML"},{"id":"74d34d5d","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA TRIÂNGULO","location":"CHOROZINHO","businessUnit":"UN-BML"},{"id":"ebc24c01","name":"FIL-01 Asc","areaM2":2.27,"station":"ETA UMIRIM","location":"UMIRIM","businessUnit":"UN-BCL"},{"id":"43bc8c85","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA URUBURETAMA","location":"URUBURETAMA","businessUnit":"UN-BCL"},{"id":"56169409","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA URUBURETAMA","location":"URUBURETAMA","businessUnit":"UN-BCL"},{"id":"7ff49fbe","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA URUBURETAMA","location":"URUBURETAMA","businessUnit":"UN-BCL"},{"id":"aa94f64d","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA URUBURETAMA","location":"URUBURETAMA","businessUnit":"UN-BCL"},{"id":"1b87d2f8","name":"FIL-05 Asc","areaM2":4.91,"station":"ETA URUBURETAMA","location":"URUBURETAMA","businessUnit":"UN-BCL"},{"id":"9543f024","name":"FIL-06 Asc","areaM2":4.91,"station":"ETA URUBURETAMA","location":"URUBURETAMA","businessUnit":"UN-BCL"},{"id":"b2eaadaa","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA URUOCA","location":"URUOCA","businessUnit":"UN-BAC"},{"id":"0c4fd447","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA URUOCA","location":"URUOCA","businessUnit":"UN-BAC"},{"id":"8e0d9dce","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA URUOCA","location":"URUOCA","businessUnit":"UN-BAC"},{"id":"9d188449","name":"FIL-01 Asc","areaM2":4.91,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"2dfad9a4","name":"FIL-02 Asc","areaM2":4.91,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"62f39b2a","name":"FIL-03 Asc","areaM2":4.91,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"9b785010","name":"FIL-04 Asc","areaM2":4.91,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"c643f217","name":"FIL-05 Desc","areaM2":1.96,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"c7921b2e","name":"FIL-06 Desc","areaM2":1.96,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"3f950443","name":"FIL-07 Desc","areaM2":1.96,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"8675a689","name":"FIL-08 Desc","areaM2":1.96,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"42a20113","name":"FIL-09 Asc","areaM2":7.07,"station":"ETA VARJOTA","location":"VARJOTA","businessUnit":"UN-BSI"},{"id":"58934c50","name":"FIL-01 Asc","areaM2":7.07,"station":"ETA VARZEA ALEGRE","location":"VÁRZEA ALEGRE","businessUnit":"UN-BSA"},{"id":"62ad73df","name":"FIL-02 Asc","areaM2":7.07,"station":"ETA VARZEA ALEGRE","location":"VÁRZEA ALEGRE","businessUnit":"UN-BSA"},{"id":"471592c3","name":"FIL-03 Asc","areaM2":7.07,"station":"ETA VARZEA ALEGRE","location":"VÁRZEA ALEGRE","businessUnit":"UN-BSA"},{"id":"d8e02caf","name":"FIL-04 Asc","areaM2":7.07,"station":"ETA VARZEA ALEGRE","location":"VÁRZEA ALEGRE","businessUnit":"UN-BSA"},{"id":"9cf85acc","name":"FIL-05 Asc","areaM2":7.07,"station":"ETA VARZEA ALEGRE","location":"VÁRZEA ALEGRE","businessUnit":"UN-BSA"},{"id":"fdeca9e9","name":"FIL-01 Asc","areaM2":8.05,"station":"ETA VÁRZEA DA VOLTA","location":"MORAÚJO","businessUnit":"UN-BAC"},{"id":"43b4003d","name":"FIL-02 Asc","areaM2":8.05,"station":"ETA VÁRZEA DA VOLTA","location":"MORAÚJO","businessUnit":"UN-BAC"},{"id":"74099967","name":"FIL-03 Asc","areaM2":8.05,"station":"ETA VÁRZEA DA VOLTA","location":"MORAÚJO","businessUnit":"UN-BAC"}]</script>
 <script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
+const { useCallback, useEffect, useMemo, useRef, useState } = React;
 
-const COLORS = {
-  bg0: '#080c14',
-  bg1: '#0f1420',
-  bg2: '#161d2e',
-  bg3: '#1e273a',
-  border: '#232d42',
-  blue: '#0068B4',
-  blueLight: '#1a8fd1',
-  teal: '#00A878',
-  tealLight: '#12c992',
-  amber: '#e8a930',
-  red: '#e84545',
-  text0: '#f0f2f8',
-  text1: '#b8bdd0',
-  text2: '#6b7490',
-  mono: "'DM Mono', monospace",
+/* ===== CONSTANTS ===== */
+const STORAGE = {
+  filters: "filtertrack.filters.v1",
+  selectedFilterId: "filtertrack.selectedFilterId.v1",
+  knownDevices: "filtertrack.knownDevices.v1",
+  activeSession: "filtertrack.activeSession.v1",
+  sessionArchive: "filtertrack.sessionArchive.v1",
+  pendingSessions: "filtertrack.pendingSessions.v1",
+  serverUrl: "filtertrack.serverUrl.v1",
+  lastSyncAt: "filtertrack.lastSyncAt.v1",
 };
+const FILTERTRACK_PREFIX = "filtertrack";
+const FLOW_EPSILON = 0.05;
+const MAX_HISTORY_POINTS = 3600;
+const SAMPLE_DISTANCE_SCALE = 100;
+const CLOUD_SERVER_URL = "https://filtertrack-api.fly.dev/filtertrack/sessions";
+const LEGACY_LOCAL_SERVER_URL = "http://10.0.2.2:8080/filtertrack/sessions";
+const DEFAULT_SERVER_URL = CLOUD_SERVER_URL;
+const FILTER_GROUP_SEPARATOR = "||";
+const EXCLUDED_FILTER_NAME_PATTERNS = [
+  "filtro rapido eta norte e eta sul", "filtro rapido eta norte",
+  "filtro rapido eta sul", "filtro ascendente de teste", "filtro setor industrial",
+];
+const DEFAULT_FILTERS = JSON.parse(document.getElementById("ft-default-filters").textContent);
 
+/* ===== UTILITIES ===== */
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const fmtNum = (n, dec = 1) => (Number.isFinite(n) ? n.toFixed(dec) : '—');
+const round = (n, dec = 3) => {
+  if (!Number.isFinite(n)) return NaN;
+  const f = Math.pow(10, dec); return Math.round(n * f) / f;
+};
+const fmtNum = (n, dec = 2, fallback = "--") =>
+  Number.isFinite(n) ? Number(n).toFixed(dec) : fallback;
+const uid = (prefix) =>
+  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const nowIso = () => new Date().toISOString();
 
-// ── Android BLE bridge ────────────────────────────────────────────────
-// Kotlin side exposes window.Android with:
-//   startScan(), stopScan(), connect(addr), disconnect(),
-//   sendCommand(cmd), isBluetoothEnabled()
-// Kotlin pushes events by calling window.FilterTrackBridge.*
-// We keep a pub/sub so React can subscribe.
+/* ===== STORAGE HELPERS ===== */
+function safeJsonParse(raw, fallback) {
+  try { const p = JSON.parse(raw); return p == null ? fallback : p; }
+  catch (_) { return fallback; }
+}
+function loadJson(key, fallback) {
+  try { const r = localStorage.getItem(key); if (!r) return fallback; return safeJsonParse(r, fallback); }
+  catch (_) { return fallback; }
+}
+function saveJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch (err) { console.error("save failed", key, err); return false; }
+}
+function loadText(key, fallback = "") {
+  try { const v = localStorage.getItem(key); return v == null ? fallback : String(v); }
+  catch (_) { return fallback; }
+}
+function saveText(key, value) {
+  try { localStorage.setItem(key, String(value ?? "")); return true; }
+  catch (_) { return false; }
+}
+
+/* ===== DEVICE/FILTER HELPERS ===== */
+function normalizeDeviceName(name) { return String(name || "").trim(); }
+function isUnknownDeviceName(name) {
+  const n = normalizeDeviceName(name).toLowerCase();
+  return !n || n === "unknown" || n === "desconhecido" || n === "n/a";
+}
+function isFilterTrackName(name) {
+  return normalizeDeviceName(name).toLowerCase().startsWith(FILTERTRACK_PREFIX);
+}
+function isKnownDevice(device, knownDeviceMap) {
+  if (!device) return false;
+  if (isUnknownDeviceName(device.name)) return false;
+  if (isFilterTrackName(device.name)) return true;
+  return !!knownDeviceMap[device.address];
+}
+function parseNumeric(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return NaN;
+  const n = parseFloat(value.replace(",", ".")); return Number.isFinite(n) ? n : NaN;
+}
+function normalizeFilterText(value) {
+  return String(value || "").normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+function getFilterStation(filter) { return String(filter && filter.station ? filter.station : "").trim(); }
+function getFilterLocation(filter) { return String(filter && filter.location ? filter.location : "").trim(); }
+function getFilterBusinessUnit(filter) { return String(filter && filter.businessUnit ? filter.businessUnit : "").trim(); }
+function formatAreaLabel(areaM2) {
+  if (areaM2 == null) return "--";
+  return `${Number(areaM2).toFixed(2).replace(/\.?0+$/, "")} m²`;
+}
+function sanitizeFilters(saved) {
+  const arr = Array.isArray(saved) ? saved : [];
+  return arr.filter(f => f && typeof f.id === "string" && typeof f.name === "string")
+    .map(f => {
+      const pa = parseNumeric(f.areaM2);
+      const areaM2 = Number.isFinite(pa) && pa > 0 ? round(pa, 4) : null;
+      return { ...f, name: String(f.name || "").replace(/\s+/g, " ").trim(), areaM2,
+        station: String(f.station || "").trim(), location: String(f.location || "").trim(),
+        businessUnit: String(f.businessUnit || "").trim() };
+    });
+}
+function isExcludedFilterName(name) {
+  const n = normalizeFilterText(name); if (!n) return false;
+  return EXCLUDED_FILTER_NAME_PATTERNS.some(p => n.includes(p));
+}
+function inferFilterDirection(filter) {
+  const r = normalizeFilterText(filter && filter.name);
+  if (r.includes("desc")) return "Desc"; if (r.includes("asc")) return "Asc"; return "Asc";
+}
+function normalizeFilterCatalog(filters) {
+  const sanitized = sanitizeFilters(filters).filter(f => !isExcludedFilterName(f.name));
+  const byId = new Map();
+  sanitized.forEach(f => byId.set(f.id, { ...f,
+    station: getFilterStation(f), location: getFilterLocation(f), businessUnit: getFilterBusinessUnit(f) }));
+  const grouped = new Map();
+  Array.from(byId.values()).forEach(f => {
+    const dir = inferFilterDirection(f);
+    const bn = `Filtro ${dir} ${f.station} ${f.businessUnit}`.replace(/\s+/g, " ").trim();
+    if (!grouped.has(bn)) grouped.set(bn, []);
+    grouped.get(bn).push({ ...f, flowDirection: dir, baseName: bn });
+  });
+  const result = [];
+  const itemOrder = (a, b) => {
+    const lc = normalizeFilterText(a.location).localeCompare(normalizeFilterText(b.location), "pt-BR");
+    if (lc !== 0) return lc; return String(a.id).localeCompare(String(b.id), "pt-BR");
+  };
+  grouped.forEach(items => {
+    items.sort(itemOrder);
+    const needsN = items.length > 1;
+    items.forEach((item, idx) => {
+      const sfx = needsN ? ` ${String(idx + 1).padStart(2, "0")}` : "";
+      result.push({ ...item, name: `${item.baseName}${sfx}` });
+    });
+  });
+  result.sort((a, b) => {
+    const sc = normalizeFilterText(a.station).localeCompare(normalizeFilterText(b.station), "pt-BR");
+    if (sc !== 0) return sc;
+    const uc = normalizeFilterText(a.businessUnit).localeCompare(normalizeFilterText(b.businessUnit), "pt-BR");
+    if (uc !== 0) return uc;
+    const nc = normalizeFilterText(a.name).localeCompare(normalizeFilterText(b.name), "pt-BR");
+    if (nc !== 0) return nc;
+    return String(a.id).localeCompare(String(b.id), "pt-BR");
+  });
+  return result.map(({ baseName, ...rest }) => rest);
+}
+function mergeDefaultFilters(saved) {
+  const defaults = sanitizeFilters(DEFAULT_FILTERS);
+  const persisted = sanitizeFilters(saved);
+  const mergedById = new Map();
+  defaults.forEach(f => mergedById.set(f.id, { ...f }));
+  persisted.forEach(f => {
+    const base = mergedById.get(f.id);
+    if (!base) { mergedById.set(f.id, { ...f }); return; }
+    const sa = parseNumeric(f.areaM2);
+    const areaM2 = Number.isFinite(sa) && sa > 0 ? round(sa, 4) : base.areaM2;
+    mergedById.set(f.id, { ...base, ...f,
+      name: String(f.name || base.name || "").replace(/\s+/g, " ").trim(),
+      areaM2: areaM2 == null ? null : areaM2,
+      station: String(f.station || base.station || "").trim(),
+      location: String(f.location || base.location || "").trim(),
+      businessUnit: String(f.businessUnit || base.businessUnit || "").trim() });
+  });
+  return normalizeFilterCatalog(Array.from(mergedById.values()));
+}
+function filterFiltersByName(filters, query) {
+  const q = normalizeFilterText(query);
+  if (!q) return Array.isArray(filters) ? filters : [];
+  return (Array.isArray(filters) ? filters : []).filter(f =>
+    normalizeFilterText(f && f.name).includes(q) ||
+    normalizeFilterText(f && f.station).includes(q) ||
+    normalizeFilterText(f && f.location).includes(q));
+}
+function groupFiltersByStationAndLocation(filters) {
+  const grouped = new Map();
+  (Array.isArray(filters) ? filters : []).forEach(f => {
+    if (!f || typeof f.id !== "string") return;
+    const key = `${getFilterStation(f)}${FILTER_GROUP_SEPARATOR}${getFilterLocation(f)}`;
+    if (!grouped.has(key)) grouped.set(key, { key, station: getFilterStation(f), location: getFilterLocation(f), filters: [] });
+    grouped.get(key).filters.push(f);
+  });
+  const groups = Array.from(grouped.values());
+  groups.forEach(g => g.filters.sort((a, b) => {
+    const nc = normalizeFilterText(a.name).localeCompare(normalizeFilterText(b.name), "pt-BR");
+    return nc !== 0 ? nc : String(a.id).localeCompare(String(b.id), "pt-BR");
+  }));
+  groups.sort((a, b) => {
+    const sc = normalizeFilterText(a.station).localeCompare(normalizeFilterText(b.station), "pt-BR");
+    return sc !== 0 ? sc : normalizeFilterText(a.location).localeCompare(normalizeFilterText(b.location), "pt-BR");
+  });
+  return groups;
+}
+
+/* ===== DATA HELPERS ===== */
+function pickDistanceFromObject(obj) {
+  if (!obj || typeof obj !== "object") return NaN;
+  const keys = ["distance","dist","distance_cm","dist_cm","distanceCm","distancia","distancia_cm"];
+  for (const k of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) { const v = parseNumeric(obj[k]); if (Number.isFinite(v)) return v; }
+  }
+  for (const val of Object.values(obj)) {
+    if (val && typeof val === "object") { const n = pickDistanceFromObject(val); if (Number.isFinite(n)) return n; }
+  }
+  return NaN;
+}
+function parsePayload(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return { distance: NaN, error: "payload vazio" };
+  if (/^(err|erro)/i.test(text)) return { distance: NaN, error: text };
+  if (text.startsWith("{") || text.startsWith("[")) {
+    try { const o = JSON.parse(text); const d = pickDistanceFromObject(o); if (Number.isFinite(d)) return { distance: d, error: null }; }
+    catch (_) {}
+  }
+  const pf = text.match(/(?:dist|distance)\s*[:=]\s*(-?\d+(?:[.,]\d+)?)/i);
+  if (pf) { const d = parseNumeric(pf[1]); if (Number.isFinite(d)) return { distance: d, error: null }; }
+  const direct = parseNumeric(text);
+  if (Number.isFinite(direct)) return { distance: direct, error: null };
+  const fn = text.match(/-?\d+(?:[.,]\d+)?/);
+  if (fn) { const d = parseNumeric(fn[0]); if (Number.isFinite(d)) return { distance: d, error: null }; }
+  return { distance: NaN, error: "payload sem distancia valida" };
+}
+function slopeMetersPerSecond(samples) {
+  if (!Array.isArray(samples) || samples.length < 2) return NaN;
+  const t0 = samples[0].ts;
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const s of samples) {
+    if (!Number.isFinite(s.distance) || !Number.isFinite(s.ts)) continue;
+    const x = (s.ts - t0) / 1000, y = s.distance / 100;
+    n++; sx += x; sy += y; sxx += x * x; sxy += x * y;
+  }
+  if (n < 2) return NaN;
+  const d = n * sxx - sx * sx;
+  if (Math.abs(d) < 1e-9) return NaN;
+  return (n * sxy - sx * sy) / d;
+}
+function computeFlowLpm(distanceSamples, areaM2, windowMs, nowTs) {
+  if (!Number.isFinite(areaM2) || areaM2 <= 0) return NaN;
+  if (!Array.isArray(distanceSamples) || distanceSamples.length < 2) return NaN;
+  const minTs = nowTs - windowMs;
+  const samples = distanceSamples.filter(s => s.ts >= minTs);
+  if (samples.length < 2) return NaN;
+  const slope = slopeMetersPerSecond(samples);
+  if (!Number.isFinite(slope)) return NaN;
+  return areaM2 * (-slope) * 60000;
+}
+function classifyFlow(flowLpm) {
+  if (!Number.isFinite(flowLpm)) return { label: "Sem dados", tone: "neutral" };
+  if (flowLpm < -FLOW_EPSILON) return { label: "Descendo", tone: "success" };
+  if (flowLpm > FLOW_EPSILON) return { label: "Subindo", tone: "danger" };
+  return { label: "Estável", tone: "neutral" };
+}
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "--";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+function downsample(points, maxPoints = 220) {
+  if (!Array.isArray(points) || points.length <= maxPoints) return points || [];
+  const sampled = []; const step = (points.length - 1) / (maxPoints - 1);
+  for (let i = 0; i < maxPoints; i++) sampled.push(points[Math.round(i * step)]);
+  return sampled;
+}
+function robustFilterDistance(samples) {
+  if (!Array.isArray(samples) || !samples.length) return NaN;
+  const values = samples.map(s => s && s.distance).filter(v => Number.isFinite(v));
+  if (!values.length) return NaN; if (values.length < 3) return values[values.length - 1];
+  const sorted = [...values].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const absDev = sorted.map(v => Math.abs(v - median)).sort((a, b) => a - b);
+  const mad = absDev[Math.floor(absDev.length / 2)];
+  const threshold = Math.max(mad * 3, 0.5);
+  const inliers = values.filter(v => Math.abs(v - median) <= threshold);
+  if (!inliers.length) return median;
+  let sum = 0; for (const v of inliers) sum += v;
+  return sum / inliers.length;
+}
+
+/* ===== SESSION HELPERS ===== */
+function createSampleSeries() {
+  return { format: "distance_cm_x100_v1", t0: null, dtUnit: "ms", distanceUnit: "cm",
+    scale: SAMPLE_DISTANCE_SCALE, t: [], d: [] };
+}
+function normalizeSampleSeries(samples) {
+  if (samples && typeof samples === "object" && samples.format === "distance_cm_x100_v1"
+    && Array.isArray(samples.t) && Array.isArray(samples.d)) {
+    return { ...samples, t0: Number.isFinite(Number(samples.t0)) ? Number(samples.t0) : null,
+      scale: SAMPLE_DISTANCE_SCALE, t: samples.t, d: samples.d };
+  }
+  const series = createSampleSeries();
+  if (Array.isArray(samples)) {
+    samples.forEach(s => { if (!s || typeof s !== "object") return; appendSample(series, s.ts, s.distanceCm); });
+  }
+  return series;
+}
+function sampleSeriesCount(samples) {
+  if (samples && typeof samples === "object" && Array.isArray(samples.t) && Array.isArray(samples.d))
+    return Math.min(samples.t.length, samples.d.length);
+  return Array.isArray(samples) ? samples.length : 0;
+}
+function appendSample(samples, ts, distanceCm) {
+  const series = normalizeSampleSeries(samples);
+  const sTs = Number(ts), dist = Number(distanceCm);
+  if (!Number.isFinite(sTs) || !Number.isFinite(dist)) return series;
+  if (!Number.isFinite(Number(series.t0))) series.t0 = Math.round(sTs);
+  series.t.push(Math.max(0, Math.round(sTs - series.t0)));
+  series.d.push(Math.round(dist * SAMPLE_DISTANCE_SCALE));
+  return series;
+}
+function readPendingSessions() {
+  const p = loadJson(STORAGE.pendingSessions, []); return Array.isArray(p) ? p : [];
+}
+function writePendingSessions(list) {
+  saveJson(STORAGE.pendingSessions, (Array.isArray(list) ? list : []).slice(-200));
+}
+function enqueueSession(session) {
+  if (!session) return 0;
+  const archive = loadJson(STORAGE.sessionArchive, []);
+  saveJson(STORAGE.sessionArchive, (Array.isArray(archive) ? [...archive, session] : [session]).slice(-300));
+  const pending = readPendingSessions(); pending.push(session);
+  writePendingSessions(pending); return pending.length;
+}
+
+/* ===== BLE BRIDGE ===== */
 const bridge = (() => {
   const listeners = new Set();
   const state = {
-    scanning: false,
-    connected: false,
-    connectionStatus: 'Idle',
-    deviceName: '',
-    deviceAddress: '',
-    devices: [],       // { name, address, rssi }
-    lastData: null,    // { distance, raw, ts }
-    distanceHistory: [],
-    rssi: -90,
-    errorMsg: '',
+    scanning: false, connected: false, connectionStatus: "Idle",
+    deviceName: "", deviceAddress: "", devices: [],
+    lastData: null, distanceSamples: [], rawLog: [], rssi: -90, errorMsg: "",
   };
+  let errorTimer = null, discardNextDistanceSample = true;
   const emit = () => listeners.forEach(fn => fn(state));
-  const sub = fn => { listeners.add(fn); fn(state); return () => listeners.delete(fn); };
-
+  const subscribe = fn => { listeners.add(fn); fn(state); return () => listeners.delete(fn); };
+  const armFirstReadingDiscard = () => { discardNextDistanceSample = true; };
+  const clearReadingBuffers = () => { state.distanceSamples = []; state.rawLog = []; state.lastData = null; };
   window.FilterTrackBridge = {
     onScanStateChanged(scanning) {
-      state.scanning = !!scanning;
-      if (scanning) state.devices = [];
-      emit();
+      state.scanning = !!scanning; if (state.scanning) state.devices = []; emit();
     },
     onDeviceFound(name, address, rssi) {
-      const existing = state.devices.findIndex(d => d.address === address);
-      const entry = { name: name || 'Desconhecido', address, rssi: Number(rssi) || -90 };
-      if (existing >= 0) state.devices[existing] = entry;
-      else state.devices = [...state.devices, entry];
+      const entry = { name: normalizeDeviceName(name) || "Desconhecido", address: String(address || ""), rssi: Number(rssi) || -90 };
+      if (!entry.address) return;
+      const idx = state.devices.findIndex(d => d.address === entry.address);
+      if (idx >= 0) state.devices[idx] = entry; else state.devices = [...state.devices, entry];
       emit();
     },
     onConnectionStateChanged(status, deviceName, deviceAddress) {
-      state.connectionStatus = status;
-      state.connected = status === 'Connected';
+      state.connectionStatus = String(status || "Unknown");
+      state.connected = state.connectionStatus === "Connected";
       if (state.connected) {
-        state.deviceName = deviceName || state.deviceName;
-        state.deviceAddress = deviceAddress || state.deviceAddress;
-      }
-      if (!state.connected) {
-        state.lastData = null;
-      }
+        state.deviceName = normalizeDeviceName(deviceName) || state.deviceName;
+        state.deviceAddress = String(deviceAddress || state.deviceAddress || "");
+        clearReadingBuffers(); armFirstReadingDiscard();
+      } else { state.lastData = null; }
       emit();
     },
     onDataReceived(raw) {
-      const parsed = parsePayload(raw);
-      state.lastData = { ...parsed, raw, ts: Date.now() };
+      const parsed = parsePayload(raw); const ts = Date.now();
+      if (Number.isFinite(parsed.distance) && discardNextDistanceSample) { discardNextDistanceSample = false; return; }
+      state.lastData = { distance: parsed.distance, error: parsed.error, raw: String(raw || ""), ts };
       if (Number.isFinite(parsed.distance)) {
-        state.distanceHistory = [...state.distanceHistory.slice(-59), parsed.distance];
+        state.distanceSamples = [...state.distanceSamples.slice(-MAX_HISTORY_POINTS + 1), { ts, distance: parsed.distance }];
       }
+      state.rawLog = [...state.rawLog.slice(-149), String(raw || "")];
       emit();
     },
-    onRssiUpdate(rssi) {
-      state.rssi = Number(rssi) || state.rssi;
-      emit();
-    },
-    onError(msg) {
-      state.errorMsg = String(msg || '');
-      emit();
-      clearTimeout(onErrorTimer);
-      onErrorTimer = setTimeout(() => { state.errorMsg = ''; emit(); }, 4000);
+    onRssiUpdate(rssi) { state.rssi = Number(rssi) || state.rssi; emit(); },
+    onError(message) {
+      state.errorMsg = String(message || "Erro BLE"); emit();
+      clearTimeout(errorTimer);
+      errorTimer = setTimeout(() => { state.errorMsg = ""; emit(); }, 5000);
     },
   };
-  let onErrorTimer = null;
-
-  function parsePayload(raw) {
-    const s = String(raw || '').trim();
-    if (s.startsWith('DIST=')) {
-      const v = parseFloat(s.slice(5));
-      return { distance: Number.isFinite(v) ? v : NaN, error: null };
-    }
-    if (s.startsWith('ERRO') || s.startsWith('ERR')) {
-      return { distance: NaN, error: s };
-    }
-    const v = parseFloat(s);
-    return { distance: Number.isFinite(v) ? v : NaN, error: null };
-  }
-
-  const call = (fn, ...args) => {
+  const callAndroid = (method, ...args) => {
     try {
-      if (window.Android && typeof window.Android[fn] === 'function') {
-        return window.Android[fn](...args);
-      }
-      console.warn('Android bridge not available:', fn);
-    } catch (e) { console.error('Bridge call failed', fn, e); }
+      if (window.Android && typeof window.Android[method] === "function") return window.Android[method](...args);
+      console.warn("Android bridge unavailable for", method); return undefined;
+    } catch (err) { console.error("Bridge call failed", method, err); return undefined; }
   };
-
   return {
-    subscribe: sub,
-    startScan: () => call('startScan'),
-    stopScan: () => call('stopScan'),
-    connect: addr => call('connect', addr),
-    disconnect: () => call('disconnect'),
-    sendCommand: cmd => call('sendCommand', String(cmd)),
-    isBluetoothEnabled: () => { try { return call('isBluetoothEnabled') !== false; } catch (_) { return true; } },
+    subscribe,
+    startScan: () => callAndroid("startScan"),
+    stopScan: () => callAndroid("stopScan"),
+    connect: (address) => callAndroid("connect", String(address || "")),
+    disconnect: () => callAndroid("disconnect"),
+    sendCommand: (cmd) => {
+      const command = String(cmd || "");
+      if (command === "1") { clearReadingBuffers(); armFirstReadingDiscard(); emit(); }
+      else if (command === "2") armFirstReadingDiscard();
+      return callAndroid("sendCommand", command);
+    },
+    isBluetoothEnabled: () => { const r = callAndroid("isBluetoothEnabled"); return r !== false; },
   };
 })();
 
 function useBLE() {
-  const [snap, setSnap] = useState({});
-  useEffect(() => bridge.subscribe(s => setSnap({ ...s })), []);
+  const [snap, setSnap] = useState({
+    scanning: false, connected: false, connectionStatus: "Idle",
+    deviceName: "", deviceAddress: "", devices: [],
+    lastData: null, distanceSamples: [], rawLog: [], rssi: -90, errorMsg: "",
+  });
+  useEffect(() => bridge.subscribe(state => setSnap({ ...state })), []);
   return { ...snap, ...bridge };
 }
 
-// ── Arc Gauge ─────────────────────────────────────────────────────────
-function ArcGauge({ value, min, max, label, unit, color, size = 120, warn, danger, decimals = 1 }) {
-  const canvasRef = useRef();
-  const hasValue = Number.isFinite(value);
-  const pct = hasValue ? (value - min) / (max - min) : 0;
-  const isWarn = warn && hasValue && value >= warn;
-  const isDanger = danger && hasValue && value >= danger;
-  const arcColor = isDanger ? COLORS.red : isWarn ? COLORS.amber : color;
+/* ===== SYNC FUNCTIONS ===== */
+async function syncSessions(serverUrl, setSyncState, originLabel = "startup") {
+  const pending = readPendingSessions();
+  if (!pending.length) {
+    setSyncState(s => ({ ...s, status: "idle", pendingCount: 0, message: "Sem sessões pendentes." }));
+    return;
+  }
+  if (!/^https?:\/\//i.test(String(serverUrl || ""))) {
+    setSyncState(s => ({ ...s, status: "error", pendingCount: pending.length, message: "URL inválida." }));
+    return;
+  }
+  setSyncState(s => ({ ...s, status: "syncing", pendingCount: pending.length, message: `Enviando ${pending.length} sessão(es)...` }));
+  const remaining = []; let sent = 0, lastError = "";
+  for (const session of pending) {
+    try {
+      const r = await fetch(serverUrl, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schemaVersion: 1, app: "FilterTrack", uploadedAt: nowIso(), session }) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      sent++;
+    } catch (err) { remaining.push(session); lastError = err?.message || "Falha"; }
+  }
+  writePendingSessions(remaining);
+  const lastSyncAt = sent > 0 ? nowIso() : loadText(STORAGE.lastSyncAt, "");
+  if (sent > 0) saveText(STORAGE.lastSyncAt, lastSyncAt);
+  const status = remaining.length === 0 ? "success" : sent > 0 ? "partial" : "error";
+  const message = status === "success" ? `Sincronizado. ${sent} sessão(es) enviadas.`
+    : status === "partial" ? `Parcial. ${sent} enviada(s), ${remaining.length} pendente(s).`
+    : `Não foi possível enviar. ${lastError}`;
+  setSyncState(s => ({ ...s, status, pendingCount: remaining.length, message, lastSuccessAt: lastSyncAt }));
+}
+function deriveFiltersUrl(serverUrl) {
+  if (!/^https?:\/\//i.test(String(serverUrl || ""))) return "";
+  try { const u = new URL(serverUrl); return u.origin + "/filtertrack/filters"; }
+  catch (_) { return ""; }
+}
+function mergeRemoteFilters(local, remote) {
+  const localList = Array.isArray(local) ? local.slice() : [];
+  if (!Array.isArray(remote) || !remote.length) return localList;
+  const byId = new Map(); localList.forEach(f => { if (f && f.id) byId.set(f.id, f); });
+  remote.forEach(r => {
+    if (!r || !r.id) return;
+    if (r.archived) { byId.delete(r.id); return; }
+    const current = byId.get(r.id);
+    const rAt = r.updatedAt || r.approvedAt || r.createdAt || "";
+    const lAt = (current && current.updatedAt) || "";
+    if (current && lAt && rAt && lAt >= rAt) return;
+    byId.set(r.id, { ...(current || {}), id: r.id,
+      name: r.name || (current && current.name) || "",
+      areaM2: r.areaM2 == null ? (current && current.areaM2) : r.areaM2,
+      station: r.station || "", location: r.location || "", businessUnit: r.businessUnit || "",
+      custom: current ? current.custom : false, updatedAt: rAt });
+  });
+  return mergeDefaultFilters(Array.from(byId.values()));
+}
+async function syncFilterCatalog(serverUrl, setFilters) {
+  const url = deriveFiltersUrl(serverUrl); if (!url) return;
+  try {
+    const r = await fetch(url, { method: "GET" }); if (!r.ok) return;
+    const body = await r.json();
+    const items = body && Array.isArray(body.items) ? body.items : [];
+    if (!items.length) return;
+    setFilters(current => mergeRemoteFilters(current, items));
+  } catch (_) {}
+}
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = size * dpr; canvas.height = size * dpr;
-    canvas.style.width = size + 'px'; canvas.style.height = size + 'px';
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-    const cx = size / 2, cy = size / 2, r = size * 0.38;
-    const startAngle = Math.PI * 0.75;
-    const endAngle = Math.PI * 2.25;
-    ctx.clearRect(0, 0, size, size);
+/* ===== IBM CARBON × CAGECE TOKENS ===== */
+const T = {
+  blue: "#0068B4", blueHover: "#0058a0", blueActive: "#00477f", blue10: "#e6f0f9", teal: "#009ca6",
+  ink: "#161616", inkMuted: "#525252", inkSubtle: "#6f6f6f", inkTertiary: "#a8a8a8",
+  canvas: "#ffffff", surface1: "#f4f4f4", surface2: "#e8e8e8",
+  hairline: "#e0e0e0", hairlineStrong: "#8d8d8d",
+  success: "#198038", warning: "#b28600", danger: "#da1e28",
+  mono: "'IBM Plex Mono', monospace",
+};
 
-    ctx.beginPath(); ctx.arc(cx, cy, r, startAngle, endAngle);
-    ctx.strokeStyle = COLORS.bg3; ctx.lineWidth = size * 0.072; ctx.lineCap = 'round';
-    ctx.stroke();
-
-    if (pct > 0) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, startAngle, startAngle + (endAngle - startAngle) * clamp(pct, 0, 1));
-      ctx.strokeStyle = arcColor; ctx.lineWidth = size * 0.072; ctx.lineCap = 'round';
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, startAngle, startAngle + (endAngle - startAngle) * clamp(pct, 0, 1));
-      ctx.strokeStyle = arcColor + '44'; ctx.lineWidth = size * 0.12; ctx.lineCap = 'round';
-      ctx.stroke();
-    }
-  }, [value, size, arcColor, pct]);
-
+/* ===== VISUAL PRIMITIVES ===== */
+function CageceMark({ size = 32 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
-      <div style={{ position: 'relative', width: size, height: size }}>
-        <canvas ref={canvasRef} />
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
-        }}>
-          <span style={{ fontFamily: COLORS.mono, fontSize: size * 0.18, fontWeight: 500, color: arcColor, lineHeight: 1 }}>
-            {hasValue ? fmtNum(value, decimals) : '—'}
-          </span>
-          <span style={{ fontSize: size * 0.09, color: COLORS.text2, marginTop: 2 }}>{unit}</span>
-        </div>
-      </div>
-      <span style={{ fontSize: 10, color: COLORS.text2, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: -size * 0.06 }}>{label}</span>
-    </div>
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
+      <rect width="40" height="40" fill={T.blue} />
+      <path d="M20 8 C 14 18, 11 24, 11 28 a 9 9 0 0 0 18 0 c 0 -4 -3 -10 -9 -20 z" fill="#fff" />
+    </svg>
   );
 }
 
-// ── Sparkline ─────────────────────────────────────────────────────────
-function Sparkline({ data, color, height = 32, width = 120 }) {
-  const canvasRef = useRef();
-  useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr; canvas.height = height * dpr;
-    canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, height);
-    if (!data || data.length < 2) return;
-    const mn = Math.min(...data), mx = Math.max(...data);
-    const range = mx - mn || 1;
-    const pts = data.map((v, i) => [i / (data.length - 1) * width, height - ((v - mn) / range) * (height - 4) - 2]);
-    const grad = ctx.createLinearGradient(0, 0, 0, height);
-    grad.addColorStop(0, color + '55'); grad.addColorStop(1, color + '00');
-    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
-    pts.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
-    ctx.lineTo(width, height); ctx.lineTo(0, height); ctx.closePath();
-    ctx.fillStyle = grad; ctx.fill();
-    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
-    pts.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
-    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.stroke();
-  }, [data, color, height, width]);
-  return <canvas ref={canvasRef} style={{ display: 'block' }} />;
+function Btn({ kind = "primary", size = "md", children, icon, iconRight, full, disabled, onClick, type = "button" }) {
+  const h = size === "sm" ? 40 : size === "lg" ? 56 : 48;
+  const px = size === "lg" ? "0 20px" : "0 16px";
+  const base = {
+    display: "inline-flex", alignItems: "center", gap: 8, height: h, padding: px,
+    fontSize: size === "sm" ? 14 : 16, fontWeight: 400, letterSpacing: 0.16,
+    border: "1px solid transparent", borderRadius: 0,
+    width: full ? "100%" : "auto", justifyContent: full ? "space-between" : "flex-start",
+    transition: "background 70ms", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1,
+  };
+  const styles = {
+    primary: { background: T.blue, color: "#fff" },
+    secondary: { background: T.ink, color: "#fff" },
+    tertiary: { background: "transparent", color: T.blue, borderColor: T.blue },
+    ghost: { background: "transparent", color: T.blue },
+    danger: { background: T.danger, color: "#fff" },
+  };
+  const s = styles[kind] || styles.primary;
+  return (
+    <button type={type} disabled={disabled} onClick={onClick}
+      onMouseEnter={e => {
+        if (disabled) return;
+        if (kind === "primary") e.currentTarget.style.background = T.blueHover;
+        else if (kind === "secondary") e.currentTarget.style.background = "#393939";
+        else if (kind === "tertiary") { e.currentTarget.style.background = T.blue; e.currentTarget.style.color = "#fff"; }
+        else if (kind === "ghost") e.currentTarget.style.background = T.blue10;
+        else if (kind === "danger") e.currentTarget.style.background = "#b81921";
+      }}
+      onMouseLeave={e => { Object.assign(e.currentTarget.style, { background: s.background, color: s.color }); }}
+      style={{ ...base, ...s }}>
+      {icon}
+      <span style={{ flex: full ? 1 : "0 0 auto", textAlign: "left" }}>{children}</span>
+      {iconRight}
+    </button>
+  );
 }
 
-// ── Stat Chip ─────────────────────────────────────────────────────────
-function StatChip({ label, value, unit, color }) {
+function Tile({ children, padding = 16, style }) {
+  return <div style={{ background: T.canvas, border: `1px solid ${T.hairline}`, padding, ...style }}>{children}</div>;
+}
+
+function Tag({ tone = "neutral", children }) {
+  const tones = {
+    neutral: { bg: "#e0e0e0", fg: T.ink }, blue: { bg: T.blue10, fg: T.blue },
+    success: { bg: "#a7f0ba", fg: "#044317" }, warning: { bg: "#fcf4d6", fg: "#684e00" },
+    danger: { bg: "#ffd7d9", fg: "#750e13" }, teal: { bg: "#9ef0f0", fg: "#005d5d" },
+  };
+  const t = tones[tone] || tones.neutral;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      height: 24, padding: "0 10px", borderRadius: 0,
+      background: t.bg, color: t.fg, fontSize: 13, fontWeight: 500, letterSpacing: 0.32,
+    }}>{children}</span>
+  );
+}
+
+function StatusInline({ kind = "info", children }) {
+  const colors = { info: T.blue, success: T.success, warning: T.warning, danger: T.danger };
+  const icon = { danger: "✕", warning: "!", success: "✓", info: "ⓘ" };
   return (
     <div style={{
-      background: COLORS.bg2, borderRadius: 12, padding: '10px 12px',
-      border: `1px solid ${COLORS.border}`, flex: 1, minWidth: 0,
+      display: "flex", alignItems: "flex-start", gap: 10, padding: "14px 16px",
+      background: T.canvas, border: `1px solid ${T.hairline}`, borderLeftWidth: 3,
+      borderLeftColor: colors[kind] || T.blue,
     }}>
-      <span style={{ fontSize: 9, color: COLORS.text2, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</span>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginTop: 4 }}>
-        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 20, fontWeight: 400, color: color || COLORS.text0, lineHeight: 1 }}>{value}</span>
-        <span style={{ fontSize: 10, color: COLORS.text2 }}>{unit}</span>
-      </div>
+      <span style={{ width: 18, height: 18, marginTop: 2, color: colors[kind] || T.blue, fontSize: 14, flexShrink: 0 }}>
+        {icon[kind] || "i"}
+      </span>
+      <div style={{ fontSize: 14, color: T.inkMuted }}>{children}</div>
     </div>
   );
 }
 
-// ── Signal bars ───────────────────────────────────────────────────────
 function SignalBars({ rssi }) {
-  const level = rssi > -55 ? 4 : rssi > -65 ? 3 : rssi > -75 ? 2 : rssi > -90 ? 1 : 0;
+  const bars = rssi > -55 ? 4 : rssi > -65 ? 3 : rssi > -75 ? 2 : rssi > -90 ? 1 : 0;
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 14 }}>
-      {[1,2,3,4].map(i => (
-        <div key={i} style={{
-          width: 3, height: 3 + i * 2.5, borderRadius: 1,
-          background: i <= level ? COLORS.teal : COLORS.border,
-        }} />
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 18 }}>
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} style={{ width: 4, height: 4 + i * 3, background: i <= bars ? T.blue : T.surface2 }} />
       ))}
     </div>
   );
 }
 
-// ── Alert Banner ──────────────────────────────────────────────────────
-function AlertBanner({ alerts }) {
-  if (!alerts.length) return null;
+function Spinner({ size = 18 }) {
   return (
     <div style={{
-      background: `${COLORS.red}18`, border: `1px solid ${COLORS.red}44`,
-      borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8,
+      width: size, height: size, border: `2px solid ${T.surface2}`,
+      borderTopColor: T.blue, borderRadius: "50%",
+      animation: "spin 1s linear infinite", flexShrink: 0,
+    }} />
+  );
+}
+
+/* ===== LAYOUT ===== */
+function AppHeader({ title, subtitle, right, onBack }) {
+  return (
+    <header style={{
+      background: T.canvas, borderBottom: `1px solid ${T.hairline}`,
+      padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0,
     }}>
-      <div style={{ width: 6, height: 6, borderRadius: 50, background: COLORS.red, flexShrink: 0,
-        boxShadow: `0 0 8px ${COLORS.red}` }} />
-      <span style={{ fontSize: 11, color: COLORS.red, fontWeight: 500, lineHeight: 1.4 }}>
-        {alerts[0]}
-      </span>
+      {onBack && (
+        <button onClick={onBack} style={{ width: 40, height: 40, display: "grid", placeItems: "center", color: T.ink, flexShrink: 0 }}>
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+            <path d="M10 3l-5 5 5 5" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
+      )}
+      <CageceMark size={32} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 17, lineHeight: 1.2 }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 13, color: T.inkSubtle, lineHeight: 1.3 }}>{subtitle}</div>}
+      </div>
+      {right}
+    </header>
+  );
+}
+
+function BottomTabs({ tab, onChange }) {
+  const tabs = [
+    { id: "monitor", label: "Monitor", icon: "M2 13h12M4 11l3-7 2 4 2-2 3 5" },
+    { id: "sessions", label: "Sessões", icon: "M3 4h10M3 8h10M3 12h10" },
+    { id: "filters", label: "Filtros", icon: "M2 4h12l-4 5v4l-4 1V9z" },
+    { id: "settings", label: "Ajustes", icon: "M8 5a3 3 0 100 6 3 3 0 000-6zm0-3v2m0 8v2M2 8h2m8 0h2" },
+  ];
+  return (
+    <nav style={{ background: T.canvas, borderTop: `1px solid ${T.hairline}`, display: "flex", height: 64, flexShrink: 0 }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => onChange(t.id)}
+          style={{
+            flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+            justifyContent: "center", gap: 4,
+            color: tab === t.id ? T.blue : T.inkMuted,
+            borderTop: tab === t.id ? `3px solid ${T.blue}` : "3px solid transparent",
+            marginTop: -1, fontSize: 12, letterSpacing: 0.32,
+          }}>
+          <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
+            <path d={t.icon} stroke="currentColor" strokeWidth="1.4" strokeLinecap="square" />
+          </svg>
+          <span>{t.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/* ===== CONNECT SCREEN ===== */
+function ConnectScreen({ ble }) {
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <AppHeader title="FilterTrack" subtitle="Cagece · Saneamento" />
+      <div style={{ flex: 1, overflow: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: 20, background: T.surface1 }}>
+        <div>
+          <div style={{ fontSize: 13, color: T.inkMuted, letterSpacing: 0.32, marginBottom: 6, textTransform: "uppercase" }}>ETAPA 01</div>
+          <h2 style={{ fontSize: 28, fontWeight: 300, letterSpacing: -0.2, lineHeight: 1.2, marginBottom: 8 }}>Conectar dispositivo</h2>
+          <p style={{ fontSize: 15, color: T.inkMuted }}>Procure o sensor BLE FilterTrack instalado na ETA.</p>
+        </div>
+
+        {ble.errorMsg ? <StatusInline kind="danger">{ble.errorMsg}</StatusInline> : null}
+
+        {!ble.scanning && ble.devices.length === 0 && (
+          <Btn kind="primary" size="lg" full onClick={ble.startScan}
+            iconRight={<svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" /></svg>}>
+            Procurar dispositivos
+          </Btn>
+        )}
+
+        {ble.scanning && (
+          <Tile padding={16}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <Spinner size={20} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, fontSize: 16 }}>Procurando...</div>
+                <div style={{ fontSize: 13, color: T.inkSubtle }}>BLE Bluetooth Low Energy</div>
+              </div>
+              <Btn kind="ghost" size="sm" onClick={ble.stopScan}>Parar</Btn>
+            </div>
+          </Tile>
+        )}
+
+        {ble.devices.length > 0 && (
+          <div>
+            <div style={{ fontSize: 13, color: T.inkMuted, letterSpacing: 0.32, marginBottom: 10, textTransform: "uppercase" }}>
+              {ble.devices.length} dispositivo{ble.devices.length > 1 ? "s" : ""} encontrado{ble.devices.length > 1 ? "s" : ""}
+            </div>
+            <Tile padding={0}>
+              {ble.devices.map((d, i) => (
+                <button key={d.address} onClick={() => ble.connect(d.address)}
+                  style={{
+                    width: "100%", padding: "16px 16px", display: "flex", alignItems: "center", gap: 14,
+                    borderBottom: i < ble.devices.length - 1 ? `1px solid ${T.hairline}` : "none", textAlign: "left",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = T.surface1}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div style={{ width: 44, height: 44, background: T.blue10, color: T.blue, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                    <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
+                      <path d="M5 4l6 4-6 4V4z M5 4l6-4v8L5 4z" stroke="currentColor" strokeWidth="1.2" />
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500, fontSize: 16 }}>{d.name}</div>
+                    <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle }}>{d.address}</div>
+                  </div>
+                  <SignalBars rssi={d.rssi} />
+                </button>
+              ))}
+            </Tile>
+          </div>
+        )}
+
+        {!ble.scanning && (
+          <StatusInline kind="info">
+            O sensor FilterTrack expõe o serviço BLE{" "}
+            <span style={{ fontFamily: T.mono }}>0x00FF</span>. Mantenha o app aberto durante a coleta.
+          </StatusInline>
+        )}
+      </div>
     </div>
   );
 }
 
-// ── Connect Screen ────────────────────────────────────────────────────
-function ConnectScreen({ ble }) {
-  const { scanning, devices, startScan, stopScan, connect, errorMsg } = ble;
+/* ===== FLOW CHART ===== */
+function FlowChart({ history }) {
+  const ref = useRef(null);
+  const sampled = useMemo(() => downsample(history, 200), [history]);
+  useEffect(() => {
+    const c = ref.current; if (!c) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = c.clientWidth, H = c.clientHeight;
+    if (!W || !H) return;
+    c.width = W * dpr; c.height = H * dpr;
+    const g = c.getContext("2d"); g.scale(dpr, dpr);
+    g.clearRect(0, 0, W, H); g.fillStyle = T.canvas; g.fillRect(0, 0, W, H);
+    if (sampled.length < 2) {
+      g.fillStyle = T.inkTertiary; g.font = "14px IBM Plex Sans"; g.textAlign = "center";
+      g.fillText("Aguardando dados...", W / 2, H / 2); return;
+    }
+    const pad = { l: 44, r: 12, t: 12, b: 24 };
+    const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+    const ts = sampled.map(p => p.ts), ds = sampled.map(p => p.distanceCm);
+    const tMin = ts[0], tMax = ts[ts.length - 1];
+    const dMin = Math.min(...ds), dMax = Math.max(...ds);
+    const dPad = Math.max(0.5, (dMax - dMin) * 0.2);
+    const yMin = dMin - dPad, yMax = dMax + dPad;
+    const x = i => pad.l + (ts[i] - tMin) / (tMax - tMin || 1) * cw;
+    const y = v => pad.t + (1 - (v - yMin) / (yMax - yMin || 1)) * ch;
+    g.strokeStyle = T.hairline; g.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const yy = pad.t + (i / 4) * ch;
+      g.beginPath(); g.moveTo(pad.l, yy); g.lineTo(W - pad.r, yy); g.stroke();
+      const v = yMax - (i / 4) * (yMax - yMin);
+      g.fillStyle = T.inkSubtle; g.font = "11px IBM Plex Mono"; g.textAlign = "right";
+      g.fillText(v.toFixed(1), pad.l - 6, yy + 4);
+    }
+    g.strokeStyle = T.blue; g.lineWidth = 2; g.beginPath();
+    sampled.forEach((p, i) => {
+      const px = x(i), py = y(p.distanceCm);
+      if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+    });
+    g.stroke();
+    const lastX = x(sampled.length - 1);
+    g.lineTo(lastX, pad.t + ch); g.lineTo(x(0), pad.t + ch);
+    g.closePath(); g.fillStyle = T.blue + "14"; g.fill();
+    g.fillStyle = T.inkSubtle; g.font = "11px IBM Plex Mono";
+    g.textAlign = "left"; g.fillText(`-${Math.round((tMax - tMin) / 1000)}s`, pad.l, H - 6);
+    g.textAlign = "right"; g.fillText("agora", W - pad.r, H - 6);
+  }, [sampled]);
+  return <canvas ref={ref} style={{ width: "100%", height: 180, display: "block" }} />;
+}
 
-  const toggleScan = () => (scanning ? stopScan() : startScan());
-
+/* ===== MONITOR TAB ===== */
+function MonitorTab({ ble, filter, filteredDistance, flowInstant, flowHistory, activeSessionMeta, onPickFilter, onStartSession }) {
+  const [sessionNow, setSessionNow] = useState(Date.now());
+  useEffect(() => { const id = setInterval(() => setSessionNow(Date.now()), 1000); return () => clearInterval(id); }, []);
+  const flowClass = classifyFlow(flowInstant);
+  const chartHistory = useMemo(() =>
+    flowHistory.filter(p => Number.isFinite(p.distanceCm)).map(p => ({ ts: p.ts, distanceCm: p.distanceCm })),
+    [flowHistory]);
+  const sessionRunning = !!activeSessionMeta;
   return (
-    <div style={{
-      flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', padding: '0 28px', gap: 18,
-    }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, position: 'relative', width: '100%' }}>
-        <div style={{
-          position: 'absolute', width: 240, height: 160, top: -20,
-          background: `radial-gradient(ellipse, ${COLORS.blue}1a 0%, transparent 70%)`,
-          pointerEvents: 'none',
-        }} />
-        <img src="logo_cagece_dark.png" alt="Cagece"
-          style={{ width: 200, height: 'auto', objectFit: 'contain', display: 'block', position: 'relative' }} />
-        <div style={{ width: '60%', height: 1, background: COLORS.border }} />
-        <img src="Cor_horiz1_fundo_escuro.png" alt="Governo do Ceará"
-          style={{ width: 150, height: 'auto', objectFit: 'contain', display: 'block', opacity: 0.9, position: 'relative' }} />
-        {scanning && (
-          <div style={{
-            position: 'absolute', inset: -24, borderRadius: 32,
-            border: `1.5px solid ${COLORS.blue}33`,
-            animation: 'pulse-ring 1.5s ease-out infinite',
-            pointerEvents: 'none',
-          }} />
-        )}
-      </div>
-
-      <div style={{
-        background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
-        borderRadius: 99, padding: '5px 14px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
-      }}>
-        <div style={{ width: 5, height: 5, borderRadius: 50, background: COLORS.teal }} />
-        <span style={{ fontSize: 11, fontWeight: 600, color: COLORS.text1, letterSpacing: '0.06em' }}>
-          FilterTrack · Monitor BLE
-        </span>
-      </div>
-
-      <div style={{ textAlign: 'center', minHeight: 30 }}>
-        <div style={{ fontSize: 12, color: COLORS.text2, lineHeight: 1.6 }}>
-          {scanning
-            ? 'Procurando dispositivos BLE próximos...'
-            : 'Conecte ao sensor ESP32 para monitorar o sistema de filtragem em tempo real.'}
+    <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, background: T.surface1 }}>
+      {/* Connection bar */}
+      <Tile padding={14} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ width: 10, height: 10, background: T.success, borderRadius: 10, flexShrink: 0, boxShadow: `0 0 0 4px ${T.success}22` }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500, fontSize: 15 }}>{ble.deviceName || ble.deviceAddress}</div>
+          <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle }}>{ble.deviceAddress}</div>
         </div>
-        {errorMsg && (
-          <div style={{ fontSize: 11, color: COLORS.red, marginTop: 6 }}>{errorMsg}</div>
-        )}
+        <SignalBars rssi={ble.rssi} />
+        <button onClick={ble.disconnect} style={{ fontSize: 14, color: T.blue, padding: "4px 8px" }}>Desconectar</button>
+      </Tile>
+
+      {/* Filter chooser */}
+      {filter ? (
+        <Tile padding={16}>
+          <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 6 }}>Filtro selecionado</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 18, fontWeight: 500, lineHeight: 1.2 }}>{filter.name}</div>
+              <div style={{ fontSize: 14, color: T.inkMuted, marginTop: 2 }}>{filter.station}</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <Tag tone="blue">{filter.businessUnit}</Tag>
+                <Tag>Área {formatAreaLabel(filter.areaM2)}</Tag>
+              </div>
+            </div>
+            <Btn kind="ghost" size="sm" onClick={onPickFilter}>Trocar</Btn>
+          </div>
+        </Tile>
+      ) : (
+        <Tile padding={16}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 500, fontSize: 16 }}>Selecione um filtro</div>
+              <div style={{ fontSize: 14, color: T.inkSubtle }}>A vazão depende da área do filtro.</div>
+            </div>
+            <Btn kind="primary" full onClick={onPickFilter}>Escolher filtro</Btn>
+          </div>
+        </Tile>
+      )}
+
+      {/* Big metrics */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <Tile padding={16}>
+          <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 8 }}>Distância</div>
+          <div style={{ fontFamily: T.mono, fontSize: 36, fontWeight: 400, lineHeight: 1, letterSpacing: -0.5 }}>
+            {Number.isFinite(filteredDistance) ? filteredDistance.toFixed(1) : "--"}
+            <span style={{ fontSize: 16, color: T.inkSubtle, marginLeft: 6 }}>cm</span>
+          </div>
+          <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 8 }}>sensor à lâmina</div>
+        </Tile>
+        <Tile padding={16}>
+          <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 8 }}>Vazão</div>
+          <div style={{
+            fontFamily: T.mono, fontSize: 36, fontWeight: 400, lineHeight: 1, letterSpacing: -0.5,
+            color: flowClass.tone === "danger" ? T.danger : flowClass.tone === "success" ? T.success : T.ink,
+          }}>
+            {Number.isFinite(flowInstant) ? Math.abs(flowInstant).toFixed(2) : "--"}
+            <span style={{ fontSize: 16, color: T.inkSubtle, marginLeft: 6 }}>L/min</span>
+          </div>
+          <div style={{ fontSize: 13, marginTop: 8 }}>
+            <Tag tone={flowClass.tone}>{flowClass.label}</Tag>
+          </div>
+        </Tile>
       </div>
 
-      <button
-        onClick={toggleScan}
-        style={{
-          background: scanning ? 'transparent' : COLORS.blue,
-          border: `1.5px solid ${COLORS.blue}`,
-          color: scanning ? COLORS.blue : '#fff',
-          borderRadius: 12, padding: '12px 32px',
-          fontSize: 13, fontWeight: 600, letterSpacing: '0.04em',
-          cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-        }}
-      >
-        {scanning ? 'Cancelar Busca' : 'Iniciar Varredura BLE'}
-      </button>
+      {/* Chart */}
+      <Tile padding={0} style={{ overflow: "hidden" }}>
+        <div style={{ padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${T.hairline}` }}>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>Lâmina d’água</div>
+          <Tag tone="blue">tempo real</Tag>
+        </div>
+        <FlowChart history={chartHistory} />
+      </Tile>
 
-      {scanning && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxHeight: 200, overflowY: 'auto' }}>
-          {devices.length === 0 && (
-            <div style={{ textAlign: 'center', color: COLORS.text2, fontSize: 11, padding: 10 }}>
-              Nenhum dispositivo encontrado ainda...
+      {/* Session control */}
+      {sessionRunning ? (
+        <Tile padding={14} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ width: 12, height: 12, background: T.danger, borderRadius: 12, flexShrink: 0, animation: "pulse 1.4s infinite" }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 500 }}>Sessão em andamento</div>
+            <div style={{ fontFamily: T.mono, fontSize: 13, color: T.inkSubtle }}>
+              {formatDuration(sessionNow - activeSessionMeta.startedAtMs)} · {sampleSeriesCount(activeSessionMeta?.samples || null)} amostras
             </div>
-          )}
-          {devices.map(d => (
-            <div
-              key={d.address}
-              onClick={() => connect(d.address)}
-              style={{
-                background: COLORS.bg2, border: `1px solid ${COLORS.blue}44`,
-                borderRadius: 10, padding: '10px 14px',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer',
-                animation: 'fade-in 0.3s ease both',
-              }}
-            >
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 12, color: COLORS.text0, fontWeight: 500,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
-                <div style={{ fontSize: 10, color: COLORS.text2, marginTop: 2, fontFamily: COLORS.mono }}>
-                  {d.address} · RSSI {d.rssi} dBm
-                </div>
-              </div>
-              <div style={{ fontSize: 11, color: COLORS.blue, fontWeight: 600, marginLeft: 8 }}>Conectar</div>
-            </div>
-          ))}
+          </div>
+          <Btn kind="danger" size="sm" onClick={onStartSession}>Encerrar</Btn>
+        </Tile>
+      ) : (
+        <Btn kind="primary" size="lg" full disabled={!filter} onClick={onStartSession}
+          iconRight={<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="4" /></svg>}>
+          Iniciar sessão de coleta
+        </Btn>
+      )}
+    </div>
+  );
+}
+
+/* ===== SESSIONS TAB ===== */
+function SessionsTab({ syncState, onSync }) {
+  const [archive, setArchive] = useState(() => {
+    const a = loadJson(STORAGE.sessionArchive, []);
+    return Array.isArray(a) ? a.slice().reverse().slice(0, 30) : [];
+  });
+  useEffect(() => {
+    const a = loadJson(STORAGE.sessionArchive, []);
+    setArchive(Array.isArray(a) ? a.slice().reverse().slice(0, 30) : []);
+  }, [syncState]);
+  const pendingIds = useMemo(() => {
+    const p = readPendingSessions();
+    return new Set(p.map(s => s.id));
+  }, [syncState]);
+  return (
+    <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, background: T.surface1 }}>
+      <Tile padding={14} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>Sincronização</div>
+          <div style={{ fontSize: 13, color: T.inkSubtle, fontFamily: T.mono }}>
+            {syncState.pendingCount > 0 ? `${syncState.pendingCount} pendente(s)` : "Sem pendentes"}
+            {syncState.lastSuccessAt ? ` · ${new Date(syncState.lastSuccessAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+          </div>
+        </div>
+        <Btn kind="tertiary" size="sm" onClick={onSync} disabled={syncState.status === "syncing"}>
+          {syncState.status === "syncing" ? <><Spinner size={14} />&nbsp;Enviando...</> : "Sincronizar"}
+        </Btn>
+      </Tile>
+
+      {syncState.message && syncState.status !== "idle" && (
+        <div style={{
+          fontSize: 13, padding: "10px 14px", background: T.canvas, border: `1px solid ${T.hairline}`,
+          color: syncState.status === "success" ? T.success : syncState.status === "error" ? T.danger : T.inkMuted,
+        }}>
+          {syncState.message}
         </div>
       )}
 
-      <style>{`
-        @keyframes pulse-ring { 0%{transform:scale(1);opacity:.6} 100%{transform:scale(1.5);opacity:0} }
-        @keyframes fade-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
-      `}</style>
+      <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", paddingLeft: 4 }}>
+        Sessões recentes
+      </div>
+
+      {archive.length === 0 && (
+        <Tile padding={32} style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 15, color: T.inkSubtle }}>Nenhuma sessão gravada</div>
+        </Tile>
+      )}
+
+      {archive.map(s => {
+        const isPending = pendingIds.has(s.id);
+        const started = s.startedAt ? new Date(s.startedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+        const duration = s.startedAt && s.endedAt ? Date.parse(s.endedAt) - Date.parse(s.startedAt) : NaN;
+        const count = sampleSeriesCount(s.samples);
+        return (
+          <Tile key={s.id} padding={16}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 15 }}>{s.filter ? s.filter.name : "Sem filtro"}</div>
+                <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 2 }}>{s.filter ? s.filter.station : ""}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle, marginTop: 4 }}>
+                  {started}{duration > 0 ? ` · ${formatDuration(duration)}` : ""} · {count} amostras
+                </div>
+              </div>
+              <Tag tone={isPending ? "warning" : "success"}>{isPending ? "Pendente" : "Enviada"}</Tag>
+            </div>
+          </Tile>
+        );
+      })}
     </div>
   );
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────────
-function Dashboard({ ble }) {
-  const { lastData, distanceHistory = [], rssi = -90, deviceName, deviceAddress, disconnect, sendCommand } = ble;
-  const distance = lastData?.distance;
-  const rxError = lastData?.error;
-
-  const alerts = [];
-  if (rxError) alerts.push(`Sensor: ${rxError}`);
-  if (Number.isFinite(distance) && distance > 80) alerts.push(`Distância elevada: ${fmtNum(distance, 1)} cm — verificar nível`);
-
-  // Derive a simple "fill" estimate from distance: closer = fuller. Range 5–100 cm.
-  const fillPct = Number.isFinite(distance)
-    ? clamp(Math.round(100 - ((distance - 5) / (100 - 5)) * 100), 0, 100)
-    : null;
-  const fillColor = fillPct == null ? COLORS.text2 : fillPct > 40 ? COLORS.teal : fillPct > 20 ? COLORS.amber : COLORS.red;
-
-  const lastUpdate = lastData?.ts
-    ? Math.round((Date.now() - lastData.ts) / 1000)
-    : null;
-
+/* ===== FILTERS TAB ===== */
+function FiltersTab({ filters, onPick }) {
+  const [q, setQ] = useState("");
+  const filtered = useMemo(() => filterFiltersByName(filters, q), [filters, q]);
   return (
-    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: COLORS.bg0 }}>
-      <div style={{
-        background: COLORS.bg1, borderBottom: `1px solid ${COLORS.border}`,
-        padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.text0 }}>FilterTrack</div>
-          <div style={{ fontSize: 10, color: COLORS.teal, marginTop: 1, display: 'flex', alignItems: 'center', gap: 4,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <div style={{ width: 5, height: 5, borderRadius: 50, background: COLORS.teal, boxShadow: `0 0 6px ${COLORS.teal}`, flexShrink: 0 }} />
-            {deviceName || deviceAddress || 'ESP32'}
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <SignalBars rssi={rssi} />
-          <span style={{ fontFamily: COLORS.mono, fontSize: 10, color: COLORS.text2 }}>{rssi} dBm</span>
-          <button onClick={disconnect} style={{
-            background: 'transparent', border: `1px solid ${COLORS.border}`,
-            color: COLORS.text2, fontSize: 10, padding: '4px 8px', borderRadius: 6,
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>Desconectar</button>
-        </div>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", background: T.surface1 }}>
+      <div style={{ padding: "12px 16px", background: T.canvas, borderBottom: `1px solid ${T.hairline}` }}>
+        <input placeholder="Buscar filtro, ETA ou município..." value={q}
+          onChange={e => setQ(e.target.value)}
+          style={{
+            width: "100%", height: 48, padding: "0 14px", background: T.surface1,
+            border: "none", borderBottom: `1px solid ${T.hairlineStrong}`,
+            outline: "none", fontSize: 16, borderRadius: 0,
+          }} />
       </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <AlertBanner alerts={alerts} />
-
-        <div style={{
-          background: COLORS.bg1, borderRadius: 16, padding: '14px 10px',
-          border: `1px solid ${COLORS.border}`,
-          display: 'flex', justifyContent: 'space-around', alignItems: 'flex-start',
-        }}>
-          <ArcGauge value={distance} min={0} max={100} label="Distância" unit="cm" color={COLORS.blue} size={108} warn={70} danger={90} />
-          <div style={{ width: 1, background: COLORS.border, alignSelf: 'stretch', margin: '8px 0' }} />
-          <ArcGauge value={fillPct == null ? NaN : fillPct} min={0} max={100} label="Nível est." unit="%" color={COLORS.teal} size={108} decimals={0} />
-        </div>
-
-        <div style={{ background: COLORS.bg2, borderRadius: 12, padding: '10px 14px', border: `1px solid ${COLORS.border}` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, alignItems: 'baseline' }}>
-            <span style={{ fontSize: 10, color: COLORS.text2, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Histórico de Distância</span>
-            <span style={{ fontFamily: COLORS.mono, fontSize: 11, color: COLORS.blue }}>últ. {distanceHistory.length} amostras</span>
-          </div>
-          <Sparkline data={distanceHistory} color={COLORS.blue} height={36} width={260} />
-        </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <StatChip label="Última leitura"
-            value={Number.isFinite(distance) ? fmtNum(distance, 2) : '—'} unit="cm"
-            color={COLORS.blue} />
-          <StatChip label="Amostras"
-            value={distanceHistory.length} unit="" color={COLORS.teal} />
-          <StatChip label="Há"
-            value={lastUpdate == null ? '—' : lastUpdate} unit="s"
-            color={lastUpdate != null && lastUpdate > 6 ? COLORS.amber : COLORS.teal} />
-        </div>
-
-        <div style={{
-          background: COLORS.bg2, borderRadius: 12, padding: '12px 14px',
-          border: `1px solid ${COLORS.border}`,
-        }}>
-          <div style={{ fontSize: 10, color: COLORS.text2, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
-            Comandos
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <CmdButton label="Baixo consumo" onClick={() => sendCommand('1')} color={COLORS.amber} />
-            <CmdButton label="Normal" onClick={() => sendCommand('2')} color={COLORS.teal} />
-            <CmdButton label="Reiniciar" onClick={() => sendCommand('0')} color={COLORS.red} />
-          </div>
-        </div>
-
-        <div style={{ background: COLORS.bg2, borderRadius: 12, padding: '10px 14px', border: `1px solid ${COLORS.border}` }}>
-          <div style={{ fontSize: 10, color: COLORS.text2, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-            Stream BLE Raw
-          </div>
-          <div style={{ fontFamily: COLORS.mono, fontSize: 10, color: COLORS.teal, lineHeight: 1.7, opacity: 0.85,
-            maxHeight: 72, overflow: 'hidden', wordBreak: 'break-all' }}>
-            {lastData?.raw ? lastData.raw : '— aguardando notify —'}
-          </div>
-        </div>
+      <div style={{ padding: "8px 16px", fontSize: 13, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>
+        {filtered.length} de {filters.length} filtros
+      </div>
+      <div style={{ flex: 1, overflow: "auto" }}>
+        <Tile padding={0} style={{ margin: "0 16px 16px" }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 14, color: T.inkSubtle }}>Nenhum filtro encontrado</div>
+          )}
+          {filtered.map((f, i) => (
+            <button key={f.id} onClick={() => onPick?.(f)}
+              style={{
+                width: "100%", padding: "16px 16px", textAlign: "left",
+                display: "flex", alignItems: "center", gap: 12,
+                borderBottom: i < filtered.length - 1 ? `1px solid ${T.hairline}` : "none",
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = T.surface1}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 15 }}>{f.name}</div>
+                <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 2 }}>{f.station} · {f.location}</div>
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontFamily: T.mono, fontSize: 14 }}>{formatAreaLabel(f.areaM2)}</div>
+                <div style={{ fontSize: 12, color: T.inkSubtle, letterSpacing: 0.32 }}>{f.businessUnit}</div>
+              </div>
+            </button>
+          ))}
+        </Tile>
       </div>
     </div>
   );
 }
 
-function CmdButton({ label, onClick, color }) {
+/* ===== SETTINGS TAB ===== */
+function SettingsTab({ serverUrl, setServerUrl }) {
+  const [url, setUrl] = useState(serverUrl);
+  const [saved, setSaved] = useState(false);
+  const save = () => { setServerUrl(url); setSaved(true); setTimeout(() => setSaved(false), 2000); };
   return (
-    <button onClick={onClick}
-      style={{
-        flex: 1, background: 'transparent', border: `1px solid ${color}66`,
-        color: color, padding: '8px 10px', borderRadius: 8,
-        fontFamily: 'inherit', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-        letterSpacing: '0.04em',
-      }}>
-      {label}
-    </button>
+    <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 16, background: T.surface1 }}>
+      <Tile padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Servidor</div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 10 }}>Endpoint para envio das sessões coletadas.</div>
+        <input value={url} onChange={e => { setUrl(e.target.value); setSaved(false); }}
+          style={{
+            width: "100%", height: 48, padding: "0 14px", background: T.surface1,
+            border: "none", borderBottom: `1px solid ${T.hairlineStrong}`,
+            outline: "none", fontSize: 15, fontFamily: T.mono,
+          }} />
+        <div style={{ marginTop: 12 }}>
+          <Btn kind={saved ? "ghost" : "primary"} onClick={save} disabled={saved}>
+            {saved ? "✓ Salvo" : "Salvar URL"}
+          </Btn>
+        </div>
+      </Tile>
+
+      <Tile padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 14 }}>Sobre</div>
+        {[
+          { k: "Versão", v: "2.0.0" },
+          { k: "Serviço BLE", v: "0x00FF / 0xFF01", mono: true },
+          { k: "Schema", v: "v3", mono: true },
+        ].map(({ k, v, mono }, i, arr) => (
+          <div key={k} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "12px 0", borderBottom: i < arr.length - 1 ? `1px solid ${T.hairline}` : "none",
+          }}>
+            <span style={{ fontSize: 14, color: T.inkMuted }}>{k}</span>
+            <span style={{ fontSize: 14, fontFamily: mono ? T.mono : "inherit" }}>{v}</span>
+          </div>
+        ))}
+      </Tile>
+    </div>
   );
 }
 
-// ── Root App ──────────────────────────────────────────────────────────
+/* ===== FILTER PICKER OVERLAY ===== */
+function FilterPickerOverlay({ filters, onPick, onClose }) {
+  return (
+    <div style={{ position: "absolute", inset: 0, background: T.canvas, display: "flex", flexDirection: "column", zIndex: 20 }}>
+      <AppHeader title="Selecionar filtro" subtitle="Catálogo Cagece" onBack={onClose} />
+      <FiltersTab filters={filters} onPick={f => { onPick(f); onClose(); }} />
+    </div>
+  );
+}
+
+/* ===== APP ROOT ===== */
 function App() {
   const ble = useBLE();
-  const showDashboard = ble.connected;
+
+  const [filters, setFilters] = useState(() => mergeDefaultFilters(loadJson(STORAGE.filters, [])));
+  const [selectedFilterId, setSelectedFilterId] = useState(() => loadText(STORAGE.selectedFilterId, ""));
+  const [knownDevices, setKnownDevices] = useState(() => { const l = loadJson(STORAGE.knownDevices, []); return Array.isArray(l) ? l : []; });
+  const [serverUrl, setServerUrl] = useState(() => {
+    const s = loadText(STORAGE.serverUrl, DEFAULT_SERVER_URL).trim();
+    if (!s || s === LEGACY_LOCAL_SERVER_URL) return DEFAULT_SERVER_URL;
+    return s;
+  });
+  const [tab, setTab] = useState("monitor");
+  const [picking, setPicking] = useState(false);
+  const [flowHistory, setFlowHistory] = useState([]);
+  const [flowInstant, setFlowInstant] = useState(NaN);
+  const [filteredDistance, setFilteredDistance] = useState(NaN);
+  const [activeSessionMeta, setActiveSessionMeta] = useState(null);
+  const [syncState, setSyncState] = useState(() => ({
+    status: "idle", pendingCount: readPendingSessions().length,
+    message: "", lastSuccessAt: loadText(STORAGE.lastSyncAt, ""),
+  }));
+  const [pendingFilterChoice, setPendingFilterChoice] = useState(false);
+
+  const selectedFilter = useMemo(() => filters.find(f => f.id === selectedFilterId) || null, [filters, selectedFilterId]);
+
+  const activeSessionRef = useRef(null);
+  const processedSampleTsRef = useRef(0);
+  const lastPersistRef = useRef(0);
+  const prevConnectedRef = useRef(false);
+  const startupDoneRef = useRef(false);
+  const bleRef = useRef(ble);
+  const selectedFilterRef = useRef(null);
+  const filteredSamplesRef = useRef([]);
+  const lastInstantUpdateRef = useRef(0);
+  const sessionStartRef = useRef(null);
+
+  useEffect(() => { bleRef.current = ble; }, [ble]);
+  useEffect(() => { selectedFilterRef.current = selectedFilter; }, [selectedFilter]);
+  useEffect(() => { saveJson(STORAGE.filters, filters); }, [filters]);
+  useEffect(() => { if (selectedFilterId) saveText(STORAGE.selectedFilterId, selectedFilterId); }, [selectedFilterId]);
+  useEffect(() => { saveJson(STORAGE.knownDevices, knownDevices); }, [knownDevices]);
+  useEffect(() => { saveText(STORAGE.serverUrl, serverUrl); }, [serverUrl]);
+
+  const persistActiveSession = useCallback((force = false) => {
+    if (!activeSessionRef.current) return;
+    const now = Date.now();
+    if (!force && now - lastPersistRef.current < 1000) return;
+    lastPersistRef.current = now;
+    saveJson(STORAGE.activeSession, activeSessionRef.current);
+  }, []);
+
+  const finalizeSession = useCallback((reason) => {
+    const session = activeSessionRef.current; if (!session) return;
+    const finalSession = { ...session, endedAt: nowIso(), endReason: reason || "unknown" };
+    if (sampleSeriesCount(finalSession.samples) > 0) {
+      const pendingCount = enqueueSession(finalSession);
+      setSyncState(s => ({ ...s, pendingCount, status: "queued", message: `Sessão salva. ${pendingCount} pendente(s).` }));
+      syncSessions(serverUrl, setSyncState, "session-end");
+    }
+    activeSessionRef.current = null; setActiveSessionMeta(null);
+    setFlowHistory([]); processedSampleTsRef.current = 0;
+    try { localStorage.removeItem(STORAGE.activeSession); } catch (_) {}
+  }, [serverUrl]);
+
+  const startNewSession = useCallback(() => {
+    if (!bleRef.current.connected) return;
+    const ble = bleRef.current;
+    const session = {
+      id: uid("session"), startedAt: nowIso(),
+      device: { name: ble.deviceName || "Dispositivo", address: ble.deviceAddress || "unknown" },
+      filter: selectedFilterRef.current ? { ...selectedFilterRef.current } : null,
+      samples: createSampleSeries(),
+    };
+    activeSessionRef.current = session;
+    setActiveSessionMeta({ id: session.id, startedAtMs: Date.now(), samples: session.samples });
+    setFlowHistory([]); setFlowInstant(NaN); setFilteredDistance(NaN);
+    filteredSamplesRef.current = []; lastInstantUpdateRef.current = 0; sessionStartRef.current = null;
+    processedSampleTsRef.current = 0; persistActiveSession(true);
+  }, [persistActiveSession]);
+
+  const handleSessionToggle = useCallback(() => {
+    if (activeSessionMeta) finalizeSession("manual_stop");
+    else startNewSession();
+  }, [activeSessionMeta, finalizeSession, startNewSession]);
+
+  useEffect(() => {
+    if (startupDoneRef.current) return; startupDoneRef.current = true;
+    const orphan = loadJson(STORAGE.activeSession, null);
+    if (orphan && sampleSeriesCount(orphan.samples) > 0) {
+      enqueueSession({ ...orphan, endedAt: nowIso(), endReason: "app_reopened", recovered: true });
+      try { localStorage.removeItem(STORAGE.activeSession); } catch (_) {}
+    }
+    syncSessions(serverUrl, setSyncState, "startup");
+    syncFilterCatalog(serverUrl, setFilters);
+  }, [serverUrl]);
+
+  useEffect(() => { syncFilterCatalog(serverUrl, setFilters); }, [serverUrl]);
+
+  useEffect(() => {
+    const prevConnected = prevConnectedRef.current;
+    const nowConnected = !!ble.connected;
+    if (!prevConnected && nowConnected) {
+      const session = {
+        id: uid("session"), startedAt: nowIso(),
+        device: { name: ble.deviceName || "Dispositivo", address: ble.deviceAddress || "unknown" },
+        filter: selectedFilter ? { ...selectedFilter } : null,
+        samples: createSampleSeries(),
+      };
+      activeSessionRef.current = session;
+      setActiveSessionMeta({ id: session.id, startedAtMs: Date.now(), samples: session.samples });
+      setFlowHistory([]); setFlowInstant(NaN); setFilteredDistance(NaN);
+      filteredSamplesRef.current = []; lastInstantUpdateRef.current = 0;
+      sessionStartRef.current = null; processedSampleTsRef.current = 0;
+      setPendingFilterChoice(true); persistActiveSession(true);
+      if (ble.deviceAddress) {
+        setKnownDevices(cur => {
+          const list = Array.isArray(cur) ? [...cur] : [];
+          const idx = list.findIndex(d => d.address === ble.deviceAddress);
+          const next = { address: ble.deviceAddress, name: ble.deviceName || "Dispositivo", lastSeenAt: nowIso() };
+          if (idx >= 0) list[idx] = next; else list.push(next);
+          return list.slice(-80);
+        });
+      }
+    }
+    if (prevConnected && !nowConnected) {
+      setPendingFilterChoice(false); finalizeSession("disconnect");
+    }
+    prevConnectedRef.current = nowConnected;
+  }, [ble.connected, ble.deviceAddress, ble.deviceName, selectedFilter, finalizeSession, persistActiveSession]);
+
+  useEffect(() => {
+    if (activeSessionRef.current) {
+      activeSessionRef.current.filter = selectedFilter ? { ...selectedFilter } : null;
+      persistActiveSession(false);
+    }
+  }, [selectedFilter, persistActiveSession]);
+
+  useEffect(() => {
+    const active = activeSessionRef.current;
+    if (!active || !ble.connected) return;
+    const rawSamples = Array.isArray(ble.distanceSamples) ? ble.distanceSamples : [];
+    const newSamples = rawSamples.filter(s => s && Number.isFinite(s.ts) && Number.isFinite(s.distance) && s.ts > processedSampleTsRef.current);
+    if (!newSamples.length) return;
+    let series = normalizeSampleSeries(active.samples);
+    newSamples.forEach(s => { series = appendSample(series, s.ts, s.distance); processedSampleTsRef.current = Math.max(processedSampleTsRef.current, s.ts); });
+    active.samples = series;
+    active.device = { name: ble.deviceName || active.device?.name || "", address: ble.deviceAddress || active.device?.address || "" };
+    active.filter = selectedFilter ? { ...selectedFilter } : null;
+    if (activeSessionMeta) setActiveSessionMeta(m => m ? { ...m, samples: series } : m);
+    persistActiveSession(false);
+  }, [ble.connected, ble.deviceAddress, ble.deviceName, ble.distanceSamples, selectedFilter, activeSessionMeta, persistActiveSession]);
+
+  useEffect(() => {
+    const tick = () => {
+      const currentBle = bleRef.current;
+      if (!currentBle || !currentBle.connected) return;
+      const now = Date.now();
+      const raw = currentBle.distanceSamples || [];
+      const recent = raw.filter(s => s.ts >= now - 2000);
+      const filtered = robustFilterDistance(recent);
+      if (!Number.isFinite(filtered)) return;
+      const filteredSample = { ts: now, distance: filtered };
+      const buf = filteredSamplesRef.current;
+      buf.push(filteredSample);
+      if (buf.length > 600) buf.splice(0, buf.length - 600);
+      if (!sessionStartRef.current) sessionStartRef.current = filteredSample;
+      const filterDef = selectedFilterRef.current;
+      const areaM2 = filterDef ? Number(filterDef.areaM2) : NaN;
+      const flow10 = computeFlowLpm(buf, areaM2, 10000, now);
+      setFilteredDistance(filtered);
+      if (now - lastInstantUpdateRef.current >= 10000) { setFlowInstant(flow10); lastInstantUpdateRef.current = now; }
+      setFlowHistory(prev => [...prev.slice(-MAX_HISTORY_POINTS + 1), { ts: now, distanceCm: round(filtered, 3), flow10 }]);
+    };
+    const id = setInterval(tick, 1000); return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const onBU = () => persistActiveSession(true);
+    window.addEventListener("beforeunload", onBU); return () => window.removeEventListener("beforeunload", onBU);
+  }, [persistActiveSession]);
+
+  const handleSync = useCallback(() => { syncSessions(serverUrl, setSyncState, "manual"); }, [serverUrl]);
+
+  const tabTitle = { monitor: "Monitor", sessions: "Sessões", filters: "Filtros", settings: "Ajustes" };
+
+  if (!ble.connected) {
+    return <ConnectScreen ble={ble} />;
+  }
 
   return (
-    <div style={{ width: '100%', height: '100%', background: COLORS.bg0,
-      display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {showDashboard
-        ? <Dashboard ble={ble} />
-        : <ConnectScreen ble={ble} />}
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <AppHeader
+        title={tabTitle[tab]}
+        subtitle={tab === "monitor" && selectedFilter ? selectedFilter.station : "Cagece · Saneamento"}
+      />
+      <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {tab === "monitor" && (
+          <MonitorTab
+            ble={ble} filter={selectedFilter}
+            filteredDistance={filteredDistance} flowInstant={flowInstant}
+            flowHistory={flowHistory} activeSessionMeta={activeSessionMeta}
+            onPickFilter={() => setPicking(true)}
+            onStartSession={handleSessionToggle}
+          />
+        )}
+        {tab === "sessions" && <SessionsTab syncState={syncState} onSync={handleSync} />}
+        {tab === "filters" && <FiltersTab filters={filters} onPick={f => { setSelectedFilterId(f.id); setTab("monitor"); }} />}
+        {tab === "settings" && <SettingsTab serverUrl={serverUrl} setServerUrl={setServerUrl} />}
+        {(picking || (ble.connected && pendingFilterChoice && !selectedFilter)) && (
+          <FilterPickerOverlay
+            filters={filters}
+            onPick={f => { setSelectedFilterId(f.id); setPendingFilterChoice(false); }}
+            onClose={() => { setPicking(false); setPendingFilterChoice(false); }}
+          />
+        )}
+      </div>
+      <BottomTabs tab={tab} onChange={setTab} />
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>

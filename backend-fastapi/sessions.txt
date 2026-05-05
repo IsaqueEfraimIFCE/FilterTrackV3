@@ -1,0 +1,185 @@
+FilterTrack backend — session resume
+====================================
+
+Project
+- Path:  C:\Users\Isaque\AndroidStudioProjects\FilterTrack\backend-fastapi
+- Stack: FastAPI + SQLite (single Fly Machine + Fly volume)
+- Fly app: filtertrack-api  (region gru, org personal)
+- Public URL: https://filtertrack-api.fly.dev/
+- BI dashboard: https://filtertrack-api.fly.dev/bi
+
+
+Current Fly state
+- App:     filtertrack-api (exists, deployed)
+- Machine: 2863064c759e38 (auto_start_machines=true, auto_stop_machines=stop, min_machines_running=0)
+- Volume:  filtertrack_data (vol_vly2d1wl7o9mxo84, gru, 1 GB) mounted at /data
+- DB file: /data/filtertrack.db
+- Last image: filtertrack-api:deployment-01KQ7BKHQ5C7W3JARTNXQKG64P (deployed 2026-04-27, full filter catalog)
+- Secrets set: FILTERTRACK_USER_KEY, FILTERTRACK_ADMIN_KEY (BI auth)
+- DATABASE_URL: must remain UNSET (only DATABASE_PATH is used)
+
+
+Architecture summary
+- Single Fly Machine, single SQLite DB on a Fly volume.
+- Fly volume is NOT replicated — backups are the user's responsibility.
+- SQLite is configured with foreign_keys=ON, busy_timeout=5000, WAL + synchronous=NORMAL.
+- Postgres was intentionally dropped (psycopg removed). Models use plain SQLAlchemy JSON.
+
+Reasoning kept on file:
+- SQLite-on-volume is the chosen low-cost path for one backend instance with modest write load.
+- Move to Postgres only when we need: multiple writers, HA/failover, managed backups, or
+  multi-machine scale-out.
+
+
+Canonical storage contract (Android <-> backend)
+- Stored session JSON keeps: session/device/filter source facts, filter.station,
+  optional filter.custom and createdAt.
+- Stripped on the way in: flow10sLpm, flow60sLpm, flowSessionLpm, direction, isoTime
+  (when ts is present), sampleCount (computed from samples).
+- sample_count column is computed from the stored samples, not trusted from input.
+- filter_station column was added; startup runs an ALTER TABLE migration for older DBs.
+
+Compact sample format (distance_cm_x100_v1)
+- 100 ms BLE samples for 10+ minute sessions are stored as parallel arrays, not objects.
+- Shape:
+    samples = {
+      format: "distance_cm_x100_v1",
+      t0: <first ts in ms>,
+      dtUnit: "ms",
+      distanceUnit: "cm",
+      scale: 100,
+      t: [offsetMs, ...],
+      d: [distanceCm * 100, ...]
+    }
+- d=2428 means 24.28 cm.
+- Backend accepts both legacy list samples and compact samples; legacy is converted to
+  compact before storage.
+- Size: 6000 samples ~71 KB compact vs ~240 KB object-per-sample (~70% smaller).
+- Live flow/direction UI is computed in memory and never persisted.
+
+
+BI dashboard and approval workflow
+- Routes:
+    GET /bi                          static dashboard (no JS deps)
+    GET /filtertrack/bi/auth         role check (user/admin keys)
+    GET /filtertrack/bi/overview     summary + flow aggregates
+    CSV exports for sessions and samples, JSON export for full sessions.
+- Two roles, gated by env vars FILTERTRACK_USER_KEY / FILTERTRACK_ADMIN_KEY:
+    user  — view, filter (date/device/filter), download, propose edits / custom filters.
+    admin — also approve or reject proposals.
+- Approved session edits update the stored session/device/filter facts.
+- Approved custom filters appear in the approved custom filters list.
+- Tables added: change_proposals, approved_filters (same SQLite DB on /data).
+
+Flow analytics (computed at query time from compact samples + filter area)
+- Sign convention matches Android: distance down = water level up = positive L/min;
+  distance up = descending = negative L/min.
+- Charts on /bi:
+    Average Net Flow By Filter (L/min)
+    Flow Direction By Filter
+    Daily Flow Trend
+    Samples By Station
+- Sessions CSV adds: flowAvailable, flowLpm, flowDirection,
+  distanceStartCm, distanceEndCm, distanceChangeCm.
+
+
+Validation done (latest deploy, machine version 6)
+- Local: python -m compileall app, TestClient ingest/list/stats/detail, role checks,
+         old-schema migration test, BI page JS via node --check.
+- Live:  /bi HTTP 200 with new chart canvases.
+         /filtertrack/bi/overview: 20 sessions, 120000 samples, 4 devices, 5 filters,
+                                   20 flow sessions (10 +ve, 10 -ve), 4 stations.
+         Admin proposal approval verified end-to-end, then test rows cleaned.
+         Machine stopped after tests; auto-start handles next request.
+
+Synthetic dataset currently on the volume
+- 20 sessions, IDs bi-test-20260427003846-01..20.
+- 6000 compact samples each, 100 ms cadence, 10 minutes per session.
+- 4 devices x 5 sessions, 5 filters/stations.
+
+
+Backups taken
+- backups\fly-volume-filtertrack-api-20260426-224418Z\
+    Clean SQLite copy (WAL was checkpointed by local open).
+- backups\fly-volume-filtertrack-api-20260426-224540Z-raw\
+    Untouched raw copy: filtertrack.db, -shm, -wal, manifest.json.
+    Zipped: backups\fly-volume-filtertrack-api-20260426-224540Z-raw.zip
+
+
+Non-interactive flyctl auth (no browser, no user intervention)
+- Why: ~/.fly/config.yml was wiped to null bytes once already (2026-04-27), forcing
+  an interactive `flyctl auth login`. A token in env or a tokens file removes that.
+- One-time setup by user (run interactively, just once):
+    flyctl tokens create deploy -a filtertrack-api -x 8760h    # 1-year deploy token
+  Copy the printed token (starts with "FlyV1 fm2_...").
+- Two ways to use the token afterwards. Pick one:
+
+  (A) Per-shell env var (simplest; persists across reboots on Windows):
+      setx FLY_API_TOKEN "FlyV1 fm2_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      # then re-open shell. flyctl will pick it up automatically.
+      # Verify:  flyctl auth whoami   (will say the token is valid for filtertrack-api).
+
+  (B) Project-local file flyctl reads on demand (gitignored):
+      Save token to:  C:\Users\Isaque\AndroidStudioProjects\FilterTrack\backend-fastapi\.fly.token
+      Add ".fly.token" to .gitignore.
+      Run deploys as:
+        set /p FLY_API_TOKEN=<.fly.token && flyctl deploy --app filtertrack-api
+      (bash equivalent: FLY_API_TOKEN="$(cat .fly.token)" flyctl deploy --app filtertrack-api)
+
+- Notes:
+  * FLY_API_TOKEN takes precedence over ~/.fly/config.yml, so the corrupt-config
+    failure mode cannot block deploys when the env var is set.
+  * Deploy tokens are scoped to one app — safer than a full personal token from
+    `flyctl auth token`. Rotate with `flyctl tokens revoke` when the laptop changes.
+  * NEVER commit the token. Treat it like a password.
+
+
+Operational cheatsheet
+  flyctl apps list
+  flyctl status --app filtertrack-api
+  flyctl deploy --app filtertrack-api
+  flyctl secrets list  --app filtertrack-api
+  flyctl secrets unset DATABASE_URL --app filtertrack-api
+  flyctl machine start  <id> --app filtertrack-api
+  flyctl machine stop   <id> --app filtertrack-api
+  flyctl ssh sftp find  /data --app filtertrack-api --machine <id>
+  flyctl ssh sftp get   /data <local-folder> --recursive --app filtertrack-api --machine <id>
+  flyctl config validate
+
+Recreate from scratch (if app is destroyed):
+  flyctl apps create  filtertrack-api --org personal
+  flyctl volumes create filtertrack_data --region gru --size 1 -a filtertrack-api
+  flyctl secrets unset DATABASE_URL -a filtertrack-api
+  flyctl secrets set FILTERTRACK_USER_KEY=... FILTERTRACK_ADMIN_KEY=... -a filtertrack-api
+  flyctl deploy -a filtertrack-api
+
+
+Full filter catalog (added 2026-04-27)
+- Android app DEFAULT_FILTERS (670 filters across 170 stations, 12 business units) was
+  extracted from app/src/main/assets/index.html line 76 into the backend at:
+    app/data/default_filters.json
+- bi.py now ships a _load_default_filters() loader (cached at module import).
+- GET /filtertrack/bi/filters now returns the union of:
+    1) the 670-filter default catalog (source="default"),
+    2) ApprovedFilter rows from the DB (source="custom" / "session"; overrides default by id),
+    3) any filter_id seen in SessionRecord that isn't in either above (source="ingested").
+  Each entry is joined with per-filter session/sample/last-seen stats.
+  Sorted by station, then name. includeArchived=false hides archived filters only.
+- BI dashboard (app/static/bi.html):
+  * filterSelect dropdown is now populated from the full registered list (state.registeredFilters),
+    grouped by station as <optgroup>, and shows " (sem dados)" next to filters with zero samples.
+    Counter shows "All filters (N)".
+  * Metrics row replaces "Filters" with two cards: "Filters (catalog)" (active registered)
+    and "Filters w/ data" (registered with samples > 0).
+- Local validation: 670 catalog filters served on empty DB; ingested known catalog id
+  shows sessions=1 / samples=2 merged in; ingested unknown id appears as 671st row
+  with source="session".
+
+
+Open items
+- 3 user-created pending custom_filter proposals named "Teste2" still in the queue;
+  user/admin to decide.
+- fly.toml still pins app=filtertrack-api; matches current deployed app.
+- Next deploy: just run `flyctl deploy --app filtertrack-api` from this folder.
+- If the Android catalog grows, re-extract line 76 of app/src/main/assets/index.html
+  into app/data/default_filters.json and redeploy. (No DB migration needed.)

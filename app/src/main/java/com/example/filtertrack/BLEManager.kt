@@ -83,8 +83,17 @@ class BLEManager private constructor(private val context: Context) {
 
     @Volatile private var isScanning = false
 
+    @SuppressLint("MissingPermission")
+    private fun hasResolvableName(result: ScanResult): Boolean {
+        val advName = result.scanRecord?.deviceName?.trim().orEmpty()
+        if (advName.isNotEmpty()) return true
+        val devName = try { result.device?.name?.trim().orEmpty() } catch (_: SecurityException) { "" }
+        return devName.isNotEmpty()
+    }
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            if (!hasResolvableName(result)) return
             handler.post {
                 bleListener?.onDeviceFound(result.device, result.rssi)
             }
@@ -92,6 +101,7 @@ class BLEManager private constructor(private val context: Context) {
 
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
             results.forEach { r ->
+                if (!hasResolvableName(r)) return@forEach
                 handler.post { bleListener?.onDeviceFound(r.device, r.rssi) }
             }
         }

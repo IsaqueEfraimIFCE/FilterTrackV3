@@ -1,0 +1,103 @@
+SESSION COMPACT — 2026-05-05
+FilterTrack UI Redesign: IBM Carbon × Cagece light theme
+
+════════════════════════════════════════════════════════
+TASK COMPLETED
+════════════════════════════════════════════════════════
+
+Applied new IBM Carbon × Cagece light-theme designs from
+  C:\Users\Isaque\Desktop\FilterTrack new\
+to both HTML surfaces of the app.
+
+────────────────────────────────────────────────────────
+1. ANDROID APP — app/src/main/assets/index.html
+────────────────────────────────────────────────────────
+Built via: python "C:\Users\Isaque\Desktop\build_index.py"
+Output:    147,524 chars · 1315 lines
+
+Design source: FilterTrack Dashboard.html (IBM Carbon light)
+Old design:    Space Grotesk, #080c14 dark background
+New design:    IBM Plex Sans + IBM Plex Mono, #ffffff canvas, #f4f4f4 surface
+
+Build pipeline (DEFAULT_FILTERS is 84KB, can't inline):
+  index_template.html  — template with %%DEFAULT_FILTERS%% placeholder
+  df.json              — raw DEFAULT_FILTERS JSON array (83,922 chars)
+  build_index.py       — injects df.json → index_template → index.html
+
+Phone sizing applied:
+  Base font:    16px
+  Metric values: 32px
+  Buttons:      40–48px height
+  Bottom tabs:  64px height
+  Touch targets: ≥44px
+
+Components preserved from old file (real logic, not mock):
+  - window.FilterTrackBridge (Kotlin→JS callbacks)
+  - window.Android.* (JS→Kotlin: startScan, stopScan, connect, disconnect, sendCommand)
+  - useBLE() hook (real BLE state machine)
+  - computeFlowLpm / robustFilterDistance
+  - DEFAULT_FILTERS catalog (84 Cagece filters)
+  - Session management + localStorage + FastAPI sync
+  - FilterPickerOverlay
+
+New visual components from design file:
+  CageceMark (SVG), Btn (sm/md/lg), Tile, Tag (5 tones),
+  StatusInline, SignalBars, Spinner, AppHeader, BottomTabs,
+  ConnectScreen, MonitorTab, FlowChart (canvas), SessionsTab,
+  FiltersTab, SettingsTab
+
+────────────────────────────────────────────────────────
+2. BI DASHBOARD — backend-fastapi/app/static/bi.html
+────────────────────────────────────────────────────────
+Design source: FilterTrack BI.html (IBM Carbon light, React)
+Old design:    Vanilla JS, Space Grotesk, #080c14 dark
+New design:    React + Babel, IBM Plex Sans/Mono, light theme
+
+Mock data from design file → replaced with real API calls:
+  /filtertrack/bi/auth          X-Access-Key header auth
+  /filtertrack/bi/overview      KPIs, series, stations, sessions
+  /filtertrack/bi/proposals     approval queue
+  /filtertrack/bi/filters       filter catalog
+  /filtertrack/bi/export/*.csv  downloads
+
+Android auto-login compatibility preserved:
+  BiDashboardActivity.kt injects JS that:
+    - Sets localStorage("filtertrack.bi.key", key)
+    - Sets document.getElementById("accessKey").value = key
+    - Clicks document.getElementById("loginBtn")
+  Solution: #accessKey is an uncontrolled input (useRef), not
+  controlled state, so Android DOM injection works correctly.
+  DOM IDs preserved: #login, #accessKey, #loginBtn
+
+Pages (React components):
+  OverviewPage  — KPI tiles + SVG LineChart + SVG BarChart + Donut + sessions table
+  FiltersPage   — filter catalog table + inline edit panel + archive proposal
+  SessionsPage  — sessions table + session edit proposal form
+  ProposalsPage — approval queue + admin approve/reject
+  SettingsPage  — CSV downloads + new filter proposal form
+
+Charts: SVG-based (not canvas) — LineChart, BarChart, Donut
+Mobile: bottom nav 56px, paddingBottom 64px, responsive grid
+
+════════════════════════════════════════════════════════
+KEY FILES
+════════════════════════════════════════════════════════
+app/src/main/assets/index.html               ← DO NOT edit directly
+app/src/main/java/.../MainActivity.kt        ← registers "Android" JS interface
+app/src/main/java/.../BiDashboardActivity.kt ← auto-login injection
+backend-fastapi/app/static/bi.html           ← BI dashboard (React)
+
+C:\Users\Isaque\Desktop\index_template.html  ← edit this, then run build_index.py
+C:\Users\Isaque\Desktop\df.json              ← DEFAULT_FILTERS data
+C:\Users\Isaque\Desktop\build_index.py       ← run to rebuild index.html
+
+════════════════════════════════════════════════════════
+HOW TO MODIFY index.html IN THE FUTURE
+════════════════════════════════════════════════════════
+1. Edit C:\Users\Isaque\Desktop\index_template.html
+2. Run: python "C:\Users\Isaque\Desktop\build_index.py"
+3. The final file is written to app/src/main/assets/index.html
+
+If DEFAULT_FILTERS data needs updating:
+  Replace C:\Users\Isaque\Desktop\df.json with the new JSON array
+  (must be a valid JSON array, no variable assignment, no semicolon)

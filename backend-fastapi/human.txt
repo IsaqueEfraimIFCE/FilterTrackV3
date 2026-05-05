@@ -1,0 +1,146 @@
+FILTERTRACK - INSTRUCOES PARA O USUARIO
+========================================
+
+Sistema com duas frentes:
+  1) App Android (FilterTrack) - conecta no dispositivo BLE, mede vazao em tempo real e envia sessoes para o backend.
+  2) Dashboard BI Web - https://filtertrack-api.fly.dev/bi - mostra dados consolidados, graficos e fluxo de aprovacao.
+
+----------------------------------------
+CHAVES DE ACESSO AO BI
+----------------------------------------
+  Admin key:
+    ft_admin_af20fe8275be4f4399a34763f68fa957
+
+  User key:
+    ft_user_a53299e1f0624132a1d645bd81d359ee
+
+Cole no campo "Access key" da tela de login do BI. A chave fica salva no navegador em localStorage; use "Logout" para remover.
+
+Niveis de acesso:
+  - User: visualiza dados, graficos, baixa relatorios e envia propostas de edicao/novos filtros.
+  - Admin: tudo que o User faz e ainda aprova/rejeita propostas e novos filtros customizados.
+
+========================================
+PARTE 1 - APP ANDROID
+========================================
+
+1. PRIMEIRO USO
+   - Conceda permissoes de Bluetooth e Localizacao quando solicitado (necessario para escanear BLE).
+   - Mantenha o Bluetooth ligado no celular.
+   - O dispositivo FilterTrack deve estar energizado e dentro do alcance.
+
+2. CONECTAR AO DISPOSITIVO (tela Connect)
+   - Toque em "Escanear" para listar dispositivos BLE proximos.
+   - Os indicadores de sinal (barras + RSSI em dBm) ajudam a identificar o aparelho mais perto.
+   - Toque no dispositivo desejado para parear e conectar.
+   - Depois de conectado, o app vai direto para o Dashboard.
+
+3. SELECIONAR UM FILTRO
+   - No topo do Dashboard, use o campo "Pesquisar filtro por nome" ou abra o seletor.
+   - Filtros aparecem agrupados por Estacao | Local.
+   - O filtro escolhido define a area (m2) usada para calcular a vazao em L/min.
+   - Para criar um filtro novo:
+       a) Toque em "Novo filtro".
+       b) Preencha Nome, Area (m2), Local e Unidade de negocio (Estacao se aplicavel).
+       c) Salve. O filtro fica disponivel localmente; para virar oficial e aparecer no BI dos outros usuarios, ele entra como proposta e precisa de aprovacao do admin.
+
+4. COMANDOS DO DISPOSITIVO (botoes inferiores)
+   - Medir: inicia uma medicao/sessao. Comando "2".
+   - Dormir: coloca o dispositivo em baixo consumo e ZERA a sessao atual. Comando "1". Pede confirmacao.
+   - Reiniciar: reinicia o aparelho - sera necessario reconectar manualmente apos alguns segundos. Comando "0". Pede confirmacao.
+   - Desconectar (canto superior direito): encerra a conexao BLE sem desligar o dispositivo.
+
+5. LEITURA EM TEMPO REAL
+   - Vazao instantanea (L/min): media curta, em verde se positiva, em vermelho se negativa (fluxo invertido).
+   - Vazao por minuto: media de 60 s.
+   - Vazao da sessao: media desde o inicio da sessao corrente.
+   - Distancia filtrada (cm): leitura de nivel ja suavizada.
+   - Direcao do fluxo: positiva, negativa ou estavel.
+   - Grafico de historico: evolucao recente da vazao.
+   - RSSI: forca do sinal BLE com o dispositivo.
+
+6. ENVIO PARA O BACKEND
+   - Ao terminar uma sessao, o app envia os dados para o "Server URL" configurado.
+   - URL padrao de producao:
+       https://filtertrack-api.fly.dev/filtertrack/sessions
+   - Para alterar, abra o campo "Server URL" no app e cole a nova URL.
+   - O status de sincronizacao aparece no Dashboard. Sessoes nao enviadas sao retentadas automaticamente quando ha conexao.
+
+7. DICAS
+   - Sempre selecione o filtro CORRETO antes de iniciar a medicao - a area do filtro entra na conta da vazao.
+   - Use "Dormir" quando precisar mover o dispositivo ou trocar de filtro - isso encerra a sessao atual de forma limpa.
+   - Se a leitura ficar congelada, desconecte e reconecte; se persistir, use "Reiniciar".
+
+========================================
+PARTE 2 - DASHBOARD BI WEB
+========================================
+
+URL: https://filtertrack-api.fly.dev/bi
+
+1. LOGIN
+   - Cole a Access key (User ou Admin).
+   - O badge "role" no topo mostra com qual perfil voce entrou.
+   - Botao "Refresh" recarrega os dados aplicando os filtros atuais.
+   - Botao "Logout" remove a chave do navegador.
+
+2. BARRA LATERAL - FILTROS DE CONSULTA
+   - From / To: intervalo de datas (datetime-local).
+   - Device: limita a um dispositivo BLE pelo endereco MAC.
+   - Filter: limita a um filtro especifico.
+   - Botao "Apply": aplica os filtros e atualiza todos os graficos e tabelas.
+
+3. BARRA LATERAL - DOWNLOADS
+   - Sessions CSV: lista de sessoes consolidadas.
+   - Samples CSV: amostras brutas (compactadas em formato distance_cm_x100_v1).
+   - Full JSON: dump completo das sessoes filtradas.
+   Os downloads respeitam os filtros aplicados.
+
+4. BARRA LATERAL - CUSTOM FILTER
+   - Permite propor um filtro novo direto pelo BI.
+   - Campos: Name, Area m2, Station, Location, Business unit.
+   - Ao enviar, vira uma proposta. Apenas admins aprovam.
+
+5. AREA PRINCIPAL - METRICAS DO TOPO
+   Cards: Sessions, Samples, Devices, Filters, Avg min (duracao media), Avg samples por sessao, Avg flow L/min, No flow (sessoes sem vazao detectada).
+
+6. AREA PRINCIPAL - GRAFICOS
+   - Sessions And Samples: serie temporal diaria de sessoes e amostras.
+   - Samples By Device: total de amostras por dispositivo.
+   - Filters: total de amostras por filtro.
+   - Approved Custom Filters: tabela dos filtros customizados ja aprovados.
+   - Average Net Flow By Filter (L/min): vazao liquida media por filtro (descontando direcao).
+   - Flow Direction By Filter: distribuicao positiva/negativa/estavel por filtro.
+   - Daily Flow Trend: tendencia diaria de vazao liquida e absoluta.
+   - Samples By Station: total de amostras agrupado por estacao.
+
+7. TABELA DE SESSOES
+   - Lista as sessoes que casam com os filtros.
+   - Mostra device, filter, inicio, fim, duracao, contagem de amostras e vazao media.
+
+8. SESSION EDIT PROPOSAL
+   - Para corrigir metadados de uma sessao ja gravada (ex.: device errado, filtro trocado).
+   - Preencha pelo menos: Session id e os campos a alterar (device name/address, filter id/name/area/station/location/business unit).
+   - Submitted by: seu nome ou empresa, para auditoria.
+   - Ao enviar, a proposta NAO altera os dados imediatamente. Fica em "change_proposals" aguardando admin.
+
+9. APPROVAL QUEUE (admin)
+   - Lista todas as propostas (sessao e filtro custom).
+   - Filtre por status: All / Pending / Approved / Rejected.
+   - Admin clica em Aprovar ou Rejeitar. Aprovado:
+       - Edicoes de sessao: aplicadas no registro original.
+       - Filtros custom: vao para "approved_filters" e ficam disponiveis para todos.
+   - Usuario comum ve a fila mas nao consegue decidir.
+
+10. FLUXO RECOMENDADO PARA CORRECOES
+    - Operador no campo nota erro -> abre o BI -> "Session Edit Proposal" -> envia.
+    - Admin entra no BI, vai em "Approval Queue", revisa e decide.
+    - Sessao corrigida aparece atualizada nos graficos no proximo Refresh.
+
+========================================
+SUPORTE / OBSERVACOES
+========================================
+- Health check do backend:  https://filtertrack-api.fly.dev/health
+- Endpoint de ingestao:     https://filtertrack-api.fly.dev/filtertrack/sessions
+- Banco roda em SQLite num volume Fly.io. Backups manuais sao recomendados se os dados forem criticos.
+- Em caso de erro 401 no BI: a chave esta errada ou foi rotacionada. Solicite a chave atualizada ao admin.
+- Em caso de erro 403: voce esta usando a chave de User numa acao reservada ao Admin.
