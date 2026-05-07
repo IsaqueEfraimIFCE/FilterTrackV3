@@ -18,9 +18,14 @@
   :focus-visible { outline: 2px solid #0f62fe; outline-offset: 1px; }
   .ft-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .ft-scroll table { min-width: 640px; }
+  .ft-chart-scroll { width: 100%; overflow-x: visible; }
   .ft-bnav { scrollbar-width: none; }
   .ft-bnav::-webkit-scrollbar { display: none; }
-  @media (max-width: 760px) { html, body { font-size: 13px; } }
+  @media (max-width: 760px) {
+    html, body { font-size: 13px; }
+    .ft-scroll { overflow-x: visible; }
+    .ft-scroll table { min-width: 100%; table-layout: fixed; }
+  }
 </style>
 </head>
 <body>
@@ -56,10 +61,125 @@ function useMediaQuery(q) {
 }
 
 const fmtN = new Intl.NumberFormat("pt-BR");
+const fmtArea = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
+const fmt1 = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
+const fmt2 = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 
 function shortDate(v) {
   if (!v) return "";
   try { return new Date(v).toLocaleString("pt-BR"); } catch(_) { return v; }
+}
+function toLocalInputValue(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (!Number.isFinite(d.getTime())) return "";
+  const shifted = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return shifted.toISOString().slice(0, 16);
+}
+function isoFromLocalInput(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+}
+function formatAreaM2(v) {
+  if (v == null || v === "") return "—";
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? `${fmtArea.format(n)} m²` : "—";
+}
+function scrollRefToPageEnd(ref) {
+  const run = () => {
+    const el = ref?.current;
+    if (!el) return;
+    el.scrollIntoView?.({ behavior: "smooth", block: "end" });
+    const doc = document.scrollingElement || document.documentElement;
+    if (doc) window.scrollTo({ top: doc.scrollHeight, behavior: "smooth" });
+  };
+  requestAnimationFrame(() => requestAnimationFrame(run));
+  setTimeout(run, 160);
+}
+function filterLabel(f) {
+  if (!f) return "";
+  const station = f.station ? ` · ${f.station}` : "";
+  return `${f.name || f.id}${station}`;
+}
+function samplePointsFromSession(session) {
+  const samples = session?.samples;
+  const points = [];
+  if (samples && typeof samples === "object" && !Array.isArray(samples)) {
+    const t0 = Number(samples.t0);
+    const offsets = Array.isArray(samples.t) ? samples.t : [];
+    const distances = Array.isArray(samples.d) ? samples.d : [];
+    const scale = Number(samples.scale) > 0 ? Number(samples.scale) : 100;
+    if (Number.isFinite(t0)) {
+      offsets.forEach((offset, i) => {
+        const ts = t0 + Number(offset);
+        const d = Number(distances[i]) / scale;
+        if (Number.isFinite(ts) && Number.isFinite(d)) points.push({ ts, distanceCm: d });
+      });
+    }
+  } else if (Array.isArray(samples)) {
+    samples.forEach(s => {
+      if (!s || typeof s !== "object") return;
+      const ts = Number(s.ts ?? s.timestamp ?? s.timeMs);
+      const parsedIso = s.isoTime ? Date.parse(s.isoTime) : NaN;
+      const finalTs = Number.isFinite(ts) ? ts : parsedIso;
+      const d = Number(s.distanceCm ?? s.distance);
+      if (Number.isFinite(finalTs) && Number.isFinite(d)) points.push({ ts: finalTs, distanceCm: d });
+    });
+  }
+  return points.sort((a, b) => a.ts - b.ts);
+}
+function buildSessionVisualization(detail) {
+  const item = detail?.item || detail;
+  const session = item?.session || {};
+  const points = samplePointsFromSession(session);
+  const areaM2 = Number(item?.filter?.areaM2 ?? item?.flow?.areaM2);
+  const result = {
+    points,
+    velocity: [],
+    stats: {
+      samples: points.length,
+      ups: 0,
+      downs: 0,
+      stable: 0,
+      minDistanceCm: null,
+      maxDistanceCm: null,
+      totalVolumeM3: null,
+      avgFlowLpm: item?.flow?.available ? Number(item.flow.flowLpm) : null,
+      durationSeconds: null,
+    },
+  };
+  if (!points.length) return result;
+  const distances = points.map(p => p.distanceCm).filter(Number.isFinite);
+  result.stats.minDistanceCm = distances.length ? Math.min(...distances) : null;
+  result.stats.maxDistanceCm = distances.length ? Math.max(...distances) : null;
+  const first = points[0], last = points[points.length - 1];
+  result.stats.durationSeconds = Math.max(0, (last.ts - first.ts) / 1000);
+  if (Number.isFinite(areaM2) && result.stats.durationSeconds > 0) {
+    const levelChangeM = -(last.distanceCm - first.distanceCm) / 100;
+    const totalVolumeM3 = areaM2 * levelChangeM;
+    result.stats.totalVolumeM3 = totalVolumeM3;
+    if (!Number.isFinite(result.stats.avgFlowLpm)) {
+      result.stats.avgFlowLpm = totalVolumeM3 * 1000 / (result.stats.durationSeconds / 60);
+    }
+  }
+  let startIdx = 0;
+  let lastChartTs = 0;
+  points.forEach((p, i) => {
+    while (startIdx < i && points[startIdx].ts < p.ts - 10000) startIdx += 1;
+    const start = points[Math.max(0, startIdx - 1)];
+    if (!start || p.ts - start.ts < 9000 || p.ts - lastChartTs < 1000) return;
+    const dtMin = (p.ts - start.ts) / 60000;
+    const velocityMpm = -((p.distanceCm - start.distanceCm) / 100) / dtMin;
+    if (!Number.isFinite(velocityMpm)) return;
+    const direction = velocityMpm > 0.1 ? "up" : velocityMpm < -0.1 ? "down" : "stable";
+    if (direction === "up") result.stats.ups += 1;
+    else if (direction === "down") result.stats.downs += 1;
+    else result.stats.stable += 1;
+    result.velocity.push({ ts: p.ts, label: new Date(p.ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }), velocityMpm });
+    lastChartTs = p.ts;
+  });
+  return result;
 }
 function numOrNull(v) {
   const n = Number(String(v || "").replace(",", "."));
@@ -78,6 +198,7 @@ function CageceMark({ size = 24 }) {
 }
 
 function Btn({ kind = "primary", size = "md", children, onClick, disabled, full, type, icon }) {
+  const { isMobile } = useLayout();
   const h = size === "sm" ? 32 : size === "lg" ? 48 : 40;
   const styles = {
     primary:  { background: T.blue,      color: "#fff",       border: `1px solid ${T.blue}` },
@@ -89,8 +210,8 @@ function Btn({ kind = "primary", size = "md", children, onClick, disabled, full,
   const s = styles[kind] ?? styles.primary;
   return (
     <button type={type || "button"} disabled={disabled} onClick={onClick}
-      style={{ ...s, height: h, padding: "0 16px", fontSize: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
-        width: full ? "100%" : "auto", transition: "background 70ms", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, whiteSpace: "nowrap" }}
+      style={{ ...s, minHeight: h, padding: "0 16px", fontSize: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+        width: full ? "100%" : "auto", transition: "background 70ms", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, whiteSpace: isMobile ? "normal" : "nowrap", minWidth: 0, textAlign: "center" }}
       onMouseEnter={e => { if (disabled) return; if (kind === "primary") e.currentTarget.style.background = T.blueHover; else if (kind === "ghost" || kind === "tertiary") e.currentTarget.style.background = T.blue10; }}
       onMouseLeave={e => { e.currentTarget.style.background = s.background || "transparent"; }}>
       {icon}{children}
@@ -104,15 +225,17 @@ function Tag({ tone = "neutral", children }) {
   return <span style={{ display: "inline-flex", alignItems: "center", height: 20, padding: "0 8px", background: bg, color: fg, fontSize: 12, fontWeight: 500, letterSpacing: 0.32, whiteSpace: "nowrap" }}>{children}</span>;
 }
 
-function Tile({ children, padding = 16, style }) {
-  return <div style={{ background: T.canvas, border: `1px solid ${T.hairline}`, padding, ...style }}>{children}</div>;
-}
+const Tile = React.forwardRef(function Tile({ children, padding = 16, style, ...props }, ref) {
+  return <div ref={ref} {...props} style={{ background: T.canvas, border: `1px solid ${T.hairline}`, padding, ...style }}>{children}</div>;
+});
 
 function Th({ children, align = "left" }) {
-  return <th style={{ textAlign: align, padding: "10px 16px", fontWeight: 500, fontSize: 12, letterSpacing: 0.32, color: T.inkMuted, textTransform: "uppercase", background: T.surface1, borderBottom: `1px solid ${T.hairline}`, whiteSpace: "nowrap" }}>{children}</th>;
+  const { isMobile } = useLayout();
+  return <th style={{ textAlign: align, padding: isMobile ? "8px 6px" : "10px 16px", fontWeight: 500, fontSize: isMobile ? 10 : 12, letterSpacing: 0.32, color: T.inkMuted, textTransform: "uppercase", background: T.surface1, borderBottom: `1px solid ${T.hairline}`, whiteSpace: isMobile ? "normal" : "nowrap", overflowWrap: "anywhere" }}>{children}</th>;
 }
 function Td({ children, align = "left" }) {
-  return <td style={{ textAlign: align, padding: "10px 16px", verticalAlign: "top", borderBottom: `1px solid ${T.hairline}` }}>{children}</td>;
+  const { isMobile } = useLayout();
+  return <td style={{ textAlign: align, padding: isMobile ? "8px 6px" : "10px 16px", verticalAlign: "top", borderBottom: `1px solid ${T.hairline}`, fontSize: isMobile ? 12 : 13, overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</td>;
 }
 
 function StatusTag({ status }) {
@@ -202,7 +325,7 @@ function PageHeader({ crumbs, title, actions }) {
         {crumbs.map((c, i) => <span key={i}><span style={{ color: i === crumbs.length - 1 ? T.inkSubtle : T.blue }}>{c}</span>{i < crumbs.length - 1 && <span style={{ margin: "0 8px", color: T.inkTertiary }}>/</span>}</span>)}
       </div>
       <div style={{ display: "flex", alignItems: isMobile ? "stretch" : "flex-end", justifyContent: "space-between", gap: 12, flexDirection: isMobile ? "column" : "row" }}>
-        <h1 style={{ fontSize: isMobile ? 22 : 26, fontWeight: 300, lineHeight: 1.2 }}>{title}</h1>
+        <h1 style={{ fontSize: isMobile ? 22 : 26, fontWeight: 300, lineHeight: 1.2, overflowWrap: "anywhere" }}>{title}</h1>
         {actions && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{actions}</div>}
       </div>
     </div>
@@ -226,13 +349,15 @@ function KpiTile({ label, value, unit, sub }) {
 }
 
 function LineChart({ data = [], height = 220, xKey = "date", yKey = "samples", y2Key, color = T.blue, color2 = T.teal }) {
-  const w = 800, pl = 48, pr = 16, pt = 16, pb = 32;
-  const cw = w - pl - pr, ch = height - pt - pb;
+  const { isMobile } = useLayout();
+  const chartHeight = isMobile ? Math.max(height, 240) : height;
+  const w = isMobile ? 360 : 800, pl = isMobile ? 40 : 48, pr = isMobile ? 10 : 16, pt = 16, pb = 32;
+  const cw = w - pl - pr, ch = chartHeight - pt - pb;
   const vals = data.flatMap(d => [Number(d[yKey]) || 0, y2Key ? (Number(d[y2Key]) || 0) : 0]);
   const vMax = Math.max(...vals, 1) * 1.1;
   const xi = i => data.length <= 1 ? pl + cw / 2 : pl + (i / (data.length - 1)) * cw;
   const yi = v => pt + (1 - v / vMax) * ch;
-  const step = Math.max(1, Math.ceil(data.length / 10));
+  const step = Math.max(1, Math.ceil(data.length / (isMobile ? 5 : 10)));
   function line(key, col) {
     const pts = data.map((d, i) => `${i === 0 ? "M" : "L"}${xi(i)},${yi(Number(d[key]) || 0)}`).join(" ");
     return <>
@@ -242,33 +367,71 @@ function LineChart({ data = [], height = 220, xKey = "date", yKey = "samples", y
     </>;
   }
   return (
-    <svg viewBox={`0 0 ${w} ${height}`} style={{ width: "100%", height: "auto", display: "block" }}>
+    <div className="ft-chart-scroll">
+    <svg viewBox={`0 0 ${w} ${chartHeight}`} preserveAspectRatio="none" style={{ width: "100%", height: chartHeight, display: "block" }}>
       {[0,1,2,3,4].map(i => { const yy = pt + (i / 4) * ch; return <g key={i}><line x1={pl} x2={w - pr} y1={yy} y2={yy} stroke={T.hairline} /><text x={pl - 8} y={yy + 4} fontSize="11" fontFamily="IBM Plex Mono" fill={T.inkSubtle} textAnchor="end">{Math.round(vMax * (1 - i / 4)).toLocaleString()}</text></g>; })}
       {line(yKey, color)}
       {y2Key && line(y2Key, color2)}
-      {data.map((d, i) => i % step === 0 ? <text key={i} x={xi(i)} y={height - 8} fontSize="11" fontFamily="IBM Plex Mono" fill={T.inkSubtle} textAnchor="middle">{String(d[xKey] || "").slice(5)}</text> : null)}
+      {data.map((d, i) => i % step === 0 ? <text key={i} x={xi(i)} y={chartHeight - 8} fontSize="11" fontFamily="IBM Plex Mono" fill={T.inkSubtle} textAnchor="middle">{String(d[xKey] || "").slice(5)}</text> : null)}
     </svg>
+    </div>
+  );
+}
+
+function VelocityChart({ data = [], height = 220 }) {
+  const { isMobile } = useLayout();
+  const chartHeight = isMobile ? Math.max(height, 240) : height;
+  const w = isMobile ? 360 : 800, pl = isMobile ? 44 : 54, pr = isMobile ? 10 : 16, pt = 16, pb = 34;
+  const cw = w - pl - pr, ch = chartHeight - pt - pb;
+  const values = data.map(d => Number(d.velocityMpm)).filter(Number.isFinite);
+  if (!values.length) {
+    return <div style={{ height: chartHeight, display: "grid", placeItems: "center", color: T.inkSubtle, fontSize: 13 }}>Sem velocidade suficiente para gráfico</div>;
+  }
+  const maxAbs = Math.max(...values.map(v => Math.abs(v)), 0.1) * 1.15;
+  const x = i => data.length <= 1 ? pl + cw / 2 : pl + (i / (data.length - 1)) * cw;
+  const y = v => pt + (1 - ((v + maxAbs) / (maxAbs * 2))) * ch;
+  const zeroY = y(0);
+  const path = data.map((d, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(Number(d.velocityMpm) || 0)}`).join(" ");
+  const step = Math.max(1, Math.ceil(data.length / (isMobile ? 4 : 8)));
+  return (
+    <div className="ft-chart-scroll">
+      <svg viewBox={`0 0 ${w} ${chartHeight}`} preserveAspectRatio="none" style={{ width: "100%", height: chartHeight, display: "block" }}>
+        {[1, 0.5, 0, -0.5, -1].map((factor, i) => {
+          const v = maxAbs * factor;
+          const yy = y(v);
+          return <g key={i}><line x1={pl} x2={w - pr} y1={yy} y2={yy} stroke={factor === 0 ? T.hairlineStrong : T.hairline} /><text x={pl - 8} y={yy + 4} fontSize="11" fontFamily="IBM Plex Mono" fill={T.inkSubtle} textAnchor="end">{v.toFixed(1)}</text></g>;
+        })}
+        <path d={`${path} L${x(data.length - 1)},${zeroY} L${x(0)},${zeroY} Z`} fill={T.blue} fillOpacity="0.06" />
+        <path d={path} fill="none" stroke={T.blue} strokeWidth="1.8" />
+        {data.map((d, i) => i % step === 0 ? <text key={i} x={x(i)} y={chartHeight - 9} fontSize="10" fontFamily="IBM Plex Mono" fill={T.inkSubtle} textAnchor="middle">{d.label}</text> : null)}
+      </svg>
+    </div>
   );
 }
 
 function BarChart({ data = [], height = 200, labelKey = "label", valueKey = "value", color = T.blue }) {
-  const w = 800, lw = 180, rp = 90;
-  const rows = Math.max(data.length, 1);
+  const { isMobile } = useLayout();
+  const chartData = isMobile ? data.slice(0, 8) : data;
+  const chartHeight = isMobile ? Math.max(190, chartData.length * 34 + 16) : height;
+  const w = isMobile ? 360 : 800, lw = isMobile ? 116 : 180, rp = isMobile ? 54 : 90;
+  const rows = Math.max(chartData.length, 1);
   const cw = w - lw - rp;
-  const rowH = (height - 16) / rows;
-  const max = Math.max(...data.map(d => Number(d[valueKey]) || 0), 1);
+  const rowH = (chartHeight - 16) / rows;
+  const max = Math.max(...chartData.map(d => Number(d[valueKey]) || 0), 1);
   return (
-    <svg viewBox={`0 0 ${w} ${height}`} style={{ width: "100%", height: "auto", display: "block" }}>
-      {data.map((d, i) => {
+    <div className="ft-chart-scroll">
+    <svg viewBox={`0 0 ${w} ${chartHeight}`} preserveAspectRatio="none" style={{ width: "100%", height: chartHeight, display: "block" }}>
+      {chartData.map((d, i) => {
         const yy = 8 + i * rowH;
         const bw = (Number(d[valueKey]) || 0) / max * cw;
         return <g key={i}>
-          <text x={lw - 10} y={yy + rowH / 2 + 4} fontSize="12" fill={T.ink} textAnchor="end">{String(d[labelKey] || "").slice(0, 24)}</text>
+          <text x={lw - 10} y={yy + rowH / 2 + 4} fontSize={isMobile ? "11" : "12"} fill={T.ink} textAnchor="end">{String(d[labelKey] || "").slice(0, isMobile ? 16 : 24)}</text>
           <rect x={lw} y={yy + rowH * 0.2} width={bw} height={rowH * 0.6} fill={color} />
           <text x={lw + bw + 8} y={yy + rowH / 2 + 4} fontSize="11" fontFamily="IBM Plex Mono" fill={T.inkSubtle}>{(Number(d[valueKey]) || 0).toLocaleString()}</text>
         </g>;
       })}
     </svg>
+    </div>
   );
 }
 
@@ -288,7 +451,7 @@ function Donut({ value = 0 }) {
 
 function FilterBar({ params, setParams, onApply, devices = [], regFilters = [] }) {
   const { isMobile } = useLayout();
-  const selStyle = { height: 34, padding: "0 8px", border: `1px solid ${T.hairline}`, background: T.surface1, fontSize: 13, outline: "none", color: T.ink };
+  const selStyle = { height: 34, padding: "0 8px", border: `1px solid ${T.hairline}`, background: T.surface1, fontSize: 13, outline: "none", color: T.ink, width: isMobile ? "100%" : "auto" };
   return (
     <div style={{ display: "flex", gap: 8, padding: isMobile ? "10px 16px" : "10px 24px", background: T.canvas, borderBottom: `1px solid ${T.hairline}`, flexWrap: "wrap", alignItems: "flex-end" }}>
       <FG label="De"><input type="datetime-local" value={params.from} onChange={e => setParams(p => ({ ...p, from: e.target.value }))} style={{ ...selStyle, fontFamily: T.mono, minWidth: 180 }} /></FG>
@@ -310,7 +473,8 @@ function FilterBar({ params, setParams, onApply, devices = [], regFilters = [] }
   );
 }
 function FG({ label, children }) {
-  return <div style={{ display: "flex", flexDirection: "column", gap: 3 }}><span style={{ fontSize: 11, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>{label}</span>{children}</div>;
+  const { isMobile } = useLayout();
+  return <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: isMobile ? "1 1 100%" : "0 0 auto", minWidth: 0 }}><span style={{ fontSize: 11, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>{label}</span>{children}</div>;
 }
 
 /* ── Overview ── */
@@ -331,8 +495,8 @@ function OverviewPage({ overview, registeredFilters, params, setParams, onApply 
       <PageHeader crumbs={["Cagece", "FilterTrack BI", "Visão geral"]} title="Visão geral"
         actions={<Btn kind="ghost" size="md" onClick={onApply}>Atualizar</Btn>} />
       <FilterBar params={params} setParams={setParams} onApply={onApply} devices={devices} regFilters={registeredFilters} />
-      <div style={{ padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : isNarrow ? "repeat(3,1fr)" : "repeat(5,1fr)", gap: 1, background: T.hairline }}>
+      <div style={{ padding: isMobile ? 12 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : isNarrow ? "repeat(3,1fr)" : "repeat(5,1fr)", gap: 1, background: T.hairline }}>
           <KpiTile label="Sessões" value={summary.totalSessions ?? 0} sub={`${summary.uniqueDevices ?? 0} dispositivos`} />
           <KpiTile label="Amostras" value={(summary.totalSamples ?? 0).toLocaleString()} sub={`Média ${(summary.avgSamplesPerSession || 0).toFixed(0)} / sessão`} />
           <KpiTile label="Filtros ativos" value={`${withData}/${active}`} sub="com dados" />
@@ -345,7 +509,7 @@ function OverviewPage({ overview, registeredFilters, params, setParams, onApply 
               <div style={{ fontSize: 14, fontWeight: 500 }}>Série temporal</div>
               <div style={{ fontSize: 12, color: T.inkSubtle }}>amostras (azul) · sessões (verde)</div>
             </div>
-            <div style={{ padding: "0 8px 8px" }}><LineChart data={series} xKey="date" yKey="samples" y2Key="sessions" /></div>
+            <div style={{ padding: isMobile ? "0 4px 8px" : "0 8px 8px" }}><LineChart data={series} xKey="date" yKey="samples" y2Key="sessions" /></div>
           </Tile>
           <Tile padding={0}>
             <div style={{ padding: "16px 16px 8px" }}>
@@ -362,7 +526,7 @@ function OverviewPage({ overview, registeredFilters, params, setParams, onApply 
             <div style={{ padding: "16px 16px 8px" }}>
               <div style={{ fontSize: 14, fontWeight: 500 }}>Top estações</div>
             </div>
-            <div style={{ padding: "0 8px 8px" }}>
+            <div style={{ padding: isMobile ? "0 4px 8px" : "0 8px 8px" }}>
               <BarChart data={stations.map(s => ({ label: s.station, value: s.samples }))} height={Math.max(120, stations.length * 30)} />
             </div>
           </Tile>
@@ -370,6 +534,23 @@ function OverviewPage({ overview, registeredFilters, params, setParams, onApply 
             <div style={{ padding: "16px 16px 8px" }}>
               <div style={{ fontSize: 14, fontWeight: 500 }}>Sessões recentes</div>
             </div>
+            {isMobile ? (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {sessions.slice(0, 6).map((r, i) => (
+                <div key={i} style={{ padding: "12px 14px", borderTop: i ? `1px solid ${T.hairline}` : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                    <span style={{ fontFamily: T.mono, color: T.blue, fontSize: 11, overflowWrap: "anywhere" }}>{r.sessionId}</span>
+                    <span style={{ fontFamily: T.mono, fontSize: 12, color: T.inkMuted, whiteSpace: "nowrap" }}>{(r.sampleCount || 0).toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: 13, marginTop: 6, overflowWrap: "anywhere" }}>{r.filter?.name || ""}</div>
+                  <div style={{ fontSize: 11, color: T.inkSubtle, marginTop: 2 }}>{shortDate(r.startedAt || r.receivedAt)}</div>
+                  <div style={{ marginTop: 6, fontFamily: T.mono, fontSize: 12 }}>
+                    {r.flow?.available ? `${Number(r.flow.flowLpm).toFixed(2)} L/min` : "Sem fluxo"}
+                  </div>
+                </div>
+              ))}
+            </div>
+            ) : (
             <div className="ft-scroll">
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead><tr><Th>Sessão</Th><Th>Filtro</Th><Th align="right">Vazão</Th><Th align="right">Amostras</Th></tr></thead>
@@ -383,6 +564,7 @@ function OverviewPage({ overview, registeredFilters, params, setParams, onApply 
               ))}</tbody>
             </table>
             </div>
+            )}
           </Tile>
         </div>
       </div>
@@ -400,6 +582,7 @@ function FiltersPage({ registeredFilters = [], api, onReload }) {
   const [submittedBy, setSubmittedBy] = useState("");
   const [msg, setMsg] = useState({ kind: "", text: "" });
   const { isMobile } = useLayout();
+  const editRef = useRef(null);
 
   const rows = useMemo(() => {
     let r = inclArchived ? registeredFilters : registeredFilters.filter(f => !f.archived);
@@ -411,6 +594,7 @@ function FiltersPage({ registeredFilters = [], api, onReload }) {
     setEditing(row);
     setEf({ name: row.name || "", areaM2: row.areaM2 ?? "", station: row.station || "", location: row.location || "", businessUnit: row.businessUnit || "", retroactive: true });
     setMsg({ kind: "", text: "" });
+    scrollRefToPageEnd(editRef);
   }
 
   async function submitEdit() {
@@ -439,7 +623,7 @@ function FiltersPage({ registeredFilters = [], api, onReload }) {
   return (
     <>
       <PageHeader crumbs={["Cagece", "FilterTrack BI", "Filtros"]} title="Filtros registrados" />
-      <div style={{ padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
+      <div style={{ padding: isMobile ? 12 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
         <Tile padding={0}>
           <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${T.hairline}`, minHeight: 48, flexWrap: "wrap" }}>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar nome, estação, UN…"
@@ -448,30 +632,59 @@ function FiltersPage({ registeredFilters = [], api, onReload }) {
               <input type="checkbox" checked={inclArchived} onChange={e => setInclArchived(e.target.checked)} style={{ margin: 0 }} /> Arquivados
             </label>
           </div>
+          {isMobile ? (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {rows.map((f, i) => (
+              <div key={f.id} style={{ padding: 14, borderTop: i ? `1px solid ${T.hairline}` : "none", background: editing?.id === f.id ? T.blue10 : "transparent" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 500, overflowWrap: "anywhere" }}>{f.name || ""}</div>
+                    <div style={{ fontSize: 12, color: T.inkSubtle, marginTop: 2, overflowWrap: "anywhere" }}>{f.station || ""}</div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
+                    <Tag tone={f.archived ? "danger" : "success"}>{f.archived ? "Arquivado" : "Ativo"}</Tag>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 12, background: T.surface1, padding: 10 }}>
+                  <div><span style={{ color: T.inkMuted }}>Área </span><span style={{ fontFamily: T.mono }}>{formatAreaM2(f.areaM2)}</span></div>
+                  <div><span style={{ color: T.inkMuted }}>Sessões </span><span style={{ fontFamily: T.mono }}>{fmtN.format(f.sessions || 0)}</span></div>
+                  <div><span style={{ color: T.inkMuted }}>Amostras </span><span style={{ fontFamily: T.mono }}>{fmtN.format(f.samples || 0)}</span></div>
+                  <div style={{ overflowWrap: "anywhere" }}><span style={{ color: T.inkMuted }}>UN </span>{f.businessUnit || ""}</div>
+                </div>
+                <div style={{ fontSize: 12, color: T.inkSubtle, marginTop: 6, overflowWrap: "anywhere" }}>{f.location || ""}</div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <Btn kind="tertiary" size="sm" onClick={() => openEdit(f)}>Editar</Btn>
+                  <Btn kind={f.archived ? "ghost" : "danger"} size="sm" onClick={() => proposeArchive(f.id, !f.archived)}>{f.archived ? "Reativar" : "Arquivar"}</Btn>
+                </div>
+              </div>
+            ))}
+          </div>
+          ) : (
           <div className="ft-scroll">
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr><Th>Filtro</Th><Th>Estação</Th><Th>Local</Th><Th align="right">Área m²</Th><Th align="right">Sessões</Th><Th align="right">Amostras</Th><Th>Status</Th><Th>Ações</Th></tr></thead>
+            <thead><tr><Th>Filtro</Th><Th>Estação</Th><Th>Local</Th><Th align="right">Área em m²</Th><Th align="right">Sessões</Th><Th align="right">Amostras</Th><Th>Status</Th><Th align="right">Ações</Th></tr></thead>
             <tbody>{rows.map(f => (
               <tr key={f.id} style={{ background: editing?.id === f.id ? T.blue10 : "transparent" }}>
                 <Td><b style={{ fontWeight: 500 }}>{f.name || ""}</b><div style={{ fontFamily: T.mono, fontSize: 11, color: T.inkSubtle }}>{f.id}</div></Td>
                 <Td>{f.station || ""}</Td>
                 <Td>{f.location || ""}<div style={{ fontSize: 11, color: T.inkSubtle }}>{f.businessUnit || ""}</div></Td>
-                <Td align="right"><span style={{ fontFamily: T.mono }}>{f.areaM2 == null ? "—" : f.areaM2}</span></Td>
+                <Td align="right"><span style={{ fontFamily: T.mono, whiteSpace: "nowrap" }}>{formatAreaM2(f.areaM2)}</span></Td>
                 <Td align="right"><span style={{ fontFamily: T.mono }}>{fmtN.format(f.sessions || 0)}</span></Td>
                 <Td align="right"><span style={{ fontFamily: T.mono }}>{fmtN.format(f.samples || 0)}</span></Td>
                 <Td><Tag tone={f.archived ? "danger" : "success"}>{f.archived ? "Arquivado" : "Ativo"}</Tag></Td>
-                <Td><div style={{ display: "flex", gap: 4 }}>
-                  <Btn kind="ghost" size="sm" onClick={() => openEdit(f)}>Editar</Btn>
+                <Td align="right"><div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <Btn kind="tertiary" size="sm" onClick={() => openEdit(f)}>Editar</Btn>
                   <Btn kind={f.archived ? "ghost" : "danger"} size="sm" onClick={() => proposeArchive(f.id, !f.archived)}>{f.archived ? "Reativar" : "Arquivar"}</Btn>
                 </div></Td>
               </tr>
             ))}</tbody>
           </table>
           </div>
+          )}
           <div style={{ padding: "8px 16px", borderTop: `1px solid ${T.hairline}`, fontSize: 12, color: T.inkMuted }}>{rows.length} de {registeredFilters.length}</div>
         </Tile>
         {editing && (
-          <Tile padding={isMobile ? 16 : 20}>
+          <Tile padding={isMobile ? 16 : 20} ref={editRef}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <div><div style={{ fontSize: 15, fontWeight: 500 }}>Editar filtro</div><div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle }}>{editing.id}</div></div>
               <Btn kind="ghost" size="sm" onClick={() => setEditing(null)}>Fechar</Btn>
@@ -501,23 +714,121 @@ function FiltersPage({ registeredFilters = [], api, onReload }) {
 
 /* ── Sessions page ── */
 
-function SessionsPage({ overview, api, onReload }) {
-  const sessions = overview?.latestSessions || [];
-  const [form, setForm] = useState({ sessionId: "", deviceName: "", deviceAddress: "", filterId: "", filterName: "", filterArea: "", filterStation: "", filterLocation: "", filterUnit: "", submittedBy: "" });
-  const [msg, setMsg] = useState({ kind: "", text: "" });
+function SessionVisualization({ detail, loading, error }) {
   const { isMobile } = useLayout();
+  const viz = useMemo(() => buildSessionVisualization(detail), [detail]);
+  const item = detail?.item || null;
+  const stats = viz.stats;
+  const flowText = Number.isFinite(stats.avgFlowLpm) ? fmt2.format(stats.avgFlowLpm) : "—";
+  const volumeText = Number.isFinite(stats.totalVolumeM3) ? fmt2.format(stats.totalVolumeM3) : "—";
+  return (
+    <Tile padding={isMobile ? 16 : 20}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14, flexDirection: isMobile ? "column" : "row" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 500 }}>Visualização da sessão</div>
+          <div style={{ fontSize: 12, color: T.inkSubtle, marginTop: 3 }}>
+            {item ? <span style={{ fontFamily: T.mono }}>{item.sessionId}</span> : "Selecione uma sessão em Visualizar."}
+          </div>
+        </div>
+        {loading && <Tag tone="blue">Carregando</Tag>}
+        {error && <Tag tone="danger">{error}</Tag>}
+      </div>
+      {item ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(6, 1fr)", gap: 8 }}>
+            <KpiTile label="Vazão média" value={flowText} unit="L/min" />
+            <KpiTile label="Volume total" value={volumeText} unit="m³" />
+            <KpiTile label="Subidas" value={fmtN.format(stats.ups || 0)} />
+            <KpiTile label="Descidas" value={fmtN.format(stats.downs || 0)} />
+            <KpiTile label="Mais próxima" value={Number.isFinite(stats.minDistanceCm) ? fmt1.format(stats.minDistanceCm) : "—"} unit="cm" />
+            <KpiTile label="Mais distante" value={Number.isFinite(stats.maxDistanceCm) ? fmt1.format(stats.maxDistanceCm) : "—"} unit="cm" />
+          </div>
+          <div style={{ border: `1px solid ${T.hairline}` }}>
+            <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.hairline}`, display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <span style={{ fontWeight: 500 }}>Velocidade</span>
+              <span style={{ color: T.inkSubtle, fontSize: 12 }}>{fmtN.format(viz.velocity.length)} pontos · {fmtN.format(stats.samples || 0)} amostras</span>
+            </div>
+            <VelocityChart data={viz.velocity} height={220} />
+          </div>
+        </div>
+      ) : (
+        <div style={{ minHeight: 120, display: "grid", placeItems: "center", color: T.inkSubtle, background: T.surface1, textAlign: "center", padding: 16 }}>
+          Use o botão Visualizar em uma sessão para carregar vazão, velocidade, subidas, descidas e distâncias.
+        </div>
+      )}
+    </Tile>
+  );
+}
+
+function SessionsPage({ overview, api, onReload, registeredFilters = [] }) {
+  const sessions = overview?.latestSessions || [];
+  const activeFilters = useMemo(() => (registeredFilters || []).filter(f => !f.archived), [registeredFilters]);
+  const [form, setForm] = useState({ sessionId: "", filterId: "", timeMode: "whole", sliceFrom: "", sliceTo: "", submittedBy: "" });
+  const [msg, setMsg] = useState({ kind: "", text: "" });
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const { isMobile } = useLayout();
+  const editRef = useRef(null);
 
   function fill(r) {
-    setForm(f => ({ ...f, sessionId: r.sessionId || "", deviceName: r.device?.name || "", deviceAddress: r.device?.address || "", filterId: r.filter?.id || "", filterName: r.filter?.name || "", filterArea: r.filter?.areaM2 ?? "", filterStation: r.filter?.station || "", filterLocation: r.filter?.location || "", filterUnit: r.filter?.businessUnit || "" }));
+    setForm(f => ({
+      ...f,
+      sessionId: r.sessionId || "",
+      filterId: r.filter?.id || "",
+      timeMode: "whole",
+      sliceFrom: toLocalInputValue(r.startedAt || r.receivedAt),
+      sliceTo: toLocalInputValue(r.endedAt || r.startedAt || r.receivedAt),
+    }));
     setMsg({ kind: "", text: "" });
+    scrollRefToPageEnd(editRef);
+  }
+
+  async function visualize(r) {
+    const ref = r.sessionId || r.ingestionId;
+    if (!ref) return;
+    setDetailLoading(true);
+    setDetailError("");
+    try {
+      const data = await api(`/filtertrack/bi/sessions/${encodeURIComponent(ref)}`);
+      setDetail(data);
+    } catch(e) {
+      setDetailError(e.message || "Falha ao carregar sessão.");
+    } finally {
+      setDetailLoading(false);
+    }
   }
 
   async function submit() {
     setMsg({ kind: "", text: "" });
+    const selectedFilter = activeFilters.find(f => f.id === form.filterId);
+    if (!selectedFilter) {
+      setMsg({ kind: "err", text: "Escolha o filtro alvo." });
+      return;
+    }
+    const payload = {
+      filter: {
+        id: selectedFilter.id,
+        name: selectedFilter.name,
+        areaM2: selectedFilter.areaM2,
+        station: selectedFilter.station,
+        location: selectedFilter.location,
+        businessUnit: selectedFilter.businessUnit,
+      },
+    };
+    if (form.timeMode === "slice") {
+      const from = isoFromLocalInput(form.sliceFrom);
+      const to = isoFromLocalInput(form.sliceTo);
+      if (!from || !to || new Date(to) <= new Date(from)) {
+        setMsg({ kind: "err", text: "Informe um recorte de tempo válido." });
+        return;
+      }
+      payload.timeSlice = { from, to };
+    }
     try {
       await api("/filtertrack/bi/proposals", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "session_edit", targetSessionRef: form.sessionId.trim(), submittedBy: form.submittedBy.trim(), payload: { device: { name: form.deviceName.trim(), address: form.deviceAddress.trim() }, filter: { id: form.filterId.trim(), name: form.filterName.trim(), areaM2: numOrNull(form.filterArea), station: form.filterStation.trim(), location: form.filterLocation.trim(), businessUnit: form.filterUnit.trim() } } }),
+        body: JSON.stringify({ type: "session_edit", targetSessionRef: form.sessionId.trim(), submittedBy: form.submittedBy.trim(), payload }),
       });
       setMsg({ kind: "ok", text: "Proposta enviada." });
       onReload();
@@ -527,8 +838,33 @@ function SessionsPage({ overview, api, onReload }) {
   return (
     <>
       <PageHeader crumbs={["Cagece", "FilterTrack BI", "Sessões"]} title="Sessões" />
-      <div style={{ padding: isMobile ? 16 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
+      <div style={{ padding: isMobile ? 12 : 24, display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 80 : 24 }}>
         <Tile padding={0}>
+          {isMobile ? (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {sessions.map((r, i) => (
+              <div key={i} style={{ padding: 14, borderTop: i ? `1px solid ${T.hairline}` : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                  <span style={{ fontFamily: T.mono, color: T.blue, fontSize: 11, overflowWrap: "anywhere" }}>{r.sessionId}</span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <Btn kind="ghost" size="sm" onClick={() => visualize(r)}>Visualizar</Btn>
+                    <Btn kind="ghost" size="sm" onClick={() => fill(r)}>Editar</Btn>
+                  </div>
+                </div>
+                <div style={{ marginTop: 8, display: "grid", gap: 5 }}>
+                  <div><span style={{ color: T.inkMuted }}>Dispositivo: </span>{r.device?.name || ""}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 11, color: T.inkSubtle, overflowWrap: "anywhere" }}>{r.device?.address || ""}</div>
+                  <div><span style={{ color: T.inkMuted }}>Filtro: </span>{r.filter?.name || ""}</div>
+                  <div style={{ fontSize: 12, color: T.inkSubtle }}>{shortDate(r.startedAt || r.receivedAt)}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span><span style={{ color: T.inkMuted }}>Amostras </span><span style={{ fontFamily: T.mono }}>{(r.sampleCount || 0).toLocaleString()}</span></span>
+                    <span style={{ fontFamily: T.mono }}>{r.flow?.available ? `${Number(r.flow.flowLpm).toFixed(2)} L/min` : "Sem fluxo"}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          ) : (
           <div className="ft-scroll">
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead><tr><Th>Sessão</Th><Th>Dispositivo</Th><Th>Filtro</Th><Th>Início</Th><Th align="right">Amostras</Th><Th>Fluxo</Th><Th></Th></tr></thead>
@@ -540,26 +876,43 @@ function SessionsPage({ overview, api, onReload }) {
                 <Td><span style={{ fontSize: 12 }}>{shortDate(r.startedAt || r.receivedAt)}</span></Td>
                 <Td align="right"><span style={{ fontFamily: T.mono }}>{(r.sampleCount || 0).toLocaleString()}</span></Td>
                 <Td>{r.flow?.available ? <><span style={{ fontFamily: T.mono }}>{Number(r.flow.flowLpm).toFixed(2)}</span><span style={{ color: T.inkSubtle }}> L/min</span></> : <span style={{ color: T.inkSubtle }}>—</span>}</Td>
-                <Td><Btn kind="ghost" size="sm" onClick={() => fill(r)}>Editar</Btn></Td>
+                <Td><div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}><Btn kind="ghost" size="sm" onClick={() => visualize(r)}>Visualizar</Btn><Btn kind="ghost" size="sm" onClick={() => fill(r)}>Editar</Btn></div></Td>
               </tr>
             ))}</tbody>
           </table>
           </div>
+          )}
         </Tile>
-        <Tile padding={isMobile ? 16 : 20}>
+        <SessionVisualization detail={detail} loading={detailLoading} error={detailError} />
+        <Tile padding={isMobile ? 16 : 20} ref={editRef}>
           <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 14 }}>Proposta de edição de sessão</div>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
             <Field label="Sessão"><input value={form.sessionId} onChange={e => setForm(f => ({ ...f, sessionId: e.target.value }))} placeholder="session id" style={IN} /></Field>
             <Field label="Enviado por"><input value={form.submittedBy} onChange={e => setForm(f => ({ ...f, submittedBy: e.target.value }))} placeholder="nome ou empresa" style={IN} /></Field>
-            <Field label="Dispositivo (nome)"><input value={form.deviceName} onChange={e => setForm(f => ({ ...f, deviceName: e.target.value }))} style={IN} /></Field>
-            <Field label="Dispositivo (endereço)"><input value={form.deviceAddress} onChange={e => setForm(f => ({ ...f, deviceAddress: e.target.value }))} style={IN} /></Field>
-            <Field label="ID do filtro"><input value={form.filterId} onChange={e => setForm(f => ({ ...f, filterId: e.target.value }))} style={IN} /></Field>
-            <Field label="Nome do filtro"><input value={form.filterName} onChange={e => setForm(f => ({ ...f, filterName: e.target.value }))} style={IN} /></Field>
-            <Field label="Área m²"><input type="number" value={form.filterArea} onChange={e => setForm(f => ({ ...f, filterArea: e.target.value }))} style={IN} /></Field>
-            <Field label="Estação"><input value={form.filterStation} onChange={e => setForm(f => ({ ...f, filterStation: e.target.value }))} style={IN} /></Field>
-            <Field label="Local"><input value={form.filterLocation} onChange={e => setForm(f => ({ ...f, filterLocation: e.target.value }))} style={IN} /></Field>
-            <Field label="Unidade"><input value={form.filterUnit} onChange={e => setForm(f => ({ ...f, filterUnit: e.target.value }))} style={IN} /></Field>
+            <Field label="Filtro alvo">
+              <select value={form.filterId} onChange={e => setForm(f => ({ ...f, filterId: e.target.value }))} style={IN}>
+                <option value="">Escolher filtro</option>
+                {activeFilters.map(f => <option key={f.id} value={f.id}>{filterLabel(f)}</option>)}
+              </select>
+            </Field>
+            <Field label="Aplicar em">
+              <select value={form.timeMode} onChange={e => setForm(f => ({ ...f, timeMode: e.target.value }))} style={IN}>
+                <option value="whole">Sessão inteira</option>
+                <option value="slice">Recorte de tempo</option>
+              </select>
+            </Field>
+            {form.timeMode === "slice" && (
+              <>
+                <Field label="Início do recorte"><input type="datetime-local" value={form.sliceFrom} onChange={e => setForm(f => ({ ...f, sliceFrom: e.target.value }))} style={{ ...IN, fontFamily: T.mono }} /></Field>
+                <Field label="Fim do recorte"><input type="datetime-local" value={form.sliceTo} onChange={e => setForm(f => ({ ...f, sliceTo: e.target.value }))} style={{ ...IN, fontFamily: T.mono }} /></Field>
+              </>
+            )}
           </div>
+          {form.filterId && (
+            <div style={{ marginTop: 10, fontSize: 12, color: T.inkSubtle, overflowWrap: "anywhere" }}>
+              {filterLabel(activeFilters.find(f => f.id === form.filterId))}
+            </div>
+          )}
           <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
             <Btn kind="primary" onClick={submit}>Enviar proposta</Btn>
             {msg.text && <span style={{ fontSize: 13, color: msg.kind === "ok" ? T.success : T.danger }}>{msg.text}</span>}
@@ -637,19 +990,24 @@ function ProposalsPage({ proposals = [], role, api, onReload }) {
 /* ── Settings page ── */
 
 function SettingsPage({ api, registeredFilters = [] }) {
-  const [form, setForm] = useState({ name: "", areaM2: "", station: "", location: "", businessUnit: "", submittedBy: "" });
+  const [form, setForm] = useState({ number: "", areaM2: "", station: "", businessUnit: "", submittedBy: "" });
   const [msg, setMsg] = useState({ kind: "", text: "" });
   const { isMobile } = useLayout();
 
   async function submitFilter() {
     setMsg({ kind: "", text: "" });
+    const number = form.number.trim();
+    if (!number) {
+      setMsg({ kind: "err", text: "Informe o número do filtro." });
+      return;
+    }
     try {
       await api("/filtertrack/bi/proposals", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "custom_filter", submittedBy: form.submittedBy.trim(), payload: { filter: { name: form.name.trim(), areaM2: numOrNull(form.areaM2), station: form.station.trim(), location: form.location.trim(), businessUnit: form.businessUnit.trim(), custom: true } } }),
+        body: JSON.stringify({ type: "custom_filter", submittedBy: form.submittedBy.trim(), payload: { filter: { number, name: `Filtro ${number}`, areaM2: numOrNull(form.areaM2), station: form.station.trim(), location: "", businessUnit: form.businessUnit.trim(), custom: true } } }),
       });
       setMsg({ kind: "ok", text: "Proposta de novo filtro enviada." });
-      setForm(f => ({ ...f, name: "", areaM2: "", station: "", location: "", businessUnit: "" }));
+      setForm(f => ({ ...f, number: "", areaM2: "", station: "", businessUnit: "" }));
     } catch(e) { setMsg({ kind: "err", text: e.message }); }
   }
 
@@ -676,10 +1034,9 @@ function SettingsPage({ api, registeredFilters = [] }) {
         <Tile padding={isMobile ? 16 : 20}>
           <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 14 }}>Proposta de novo filtro</div>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
-            <Field label="Nome"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={IN} /></Field>
+            <Field label="Número do filtro"><input value={form.number} onChange={e => setForm(f => ({ ...f, number: e.target.value }))} style={IN} /></Field>
             <Field label="Área m²"><input type="number" value={form.areaM2} onChange={e => setForm(f => ({ ...f, areaM2: e.target.value }))} style={IN} /></Field>
             <Field label="Estação"><input value={form.station} onChange={e => setForm(f => ({ ...f, station: e.target.value }))} style={IN} /></Field>
-            <Field label="Local"><input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} style={IN} /></Field>
             <Field label="Unidade"><input value={form.businessUnit} onChange={e => setForm(f => ({ ...f, businessUnit: e.target.value }))} style={IN} /></Field>
             <Field label="Enviado por"><input value={form.submittedBy} onChange={e => setForm(f => ({ ...f, submittedBy: e.target.value }))} style={IN} /></Field>
           </div>
@@ -827,7 +1184,7 @@ function App() {
             {loading && !overview && <div style={{ padding: 48, textAlign: "center", color: T.inkSubtle }}>Carregando…</div>}
             {view === "overview"  && overview && <OverviewPage overview={overview} registeredFilters={registeredFilters} params={params} setParams={setParams} onApply={loadAll} />}
             {view === "filters"   && <FiltersPage registeredFilters={registeredFilters} api={api} onReload={loadAll} />}
-            {view === "sessions"  && <SessionsPage overview={overview} api={api} onReload={loadAll} />}
+            {view === "sessions"  && <SessionsPage overview={overview} api={api} onReload={loadAll} registeredFilters={registeredFilters} />}
             {view === "proposals" && <ProposalsPage proposals={proposals} role={role} api={api} onReload={loadAll} />}
             {view === "settings"  && <SettingsPage api={api} registeredFilters={registeredFilters} />}
           </main>

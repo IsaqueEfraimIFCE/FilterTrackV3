@@ -55,11 +55,16 @@ const STORAGE = {
   pendingSessions: "filtertrack.pendingSessions.v1",
   serverUrl: "filtertrack.serverUrl.v1",
   lastSyncAt: "filtertrack.lastSyncAt.v1",
+  debugMode: "filtertrack.debugMode.v1",
 };
 const FILTERTRACK_PREFIX = "filtertrack";
 const FLOW_EPSILON = 0.05;
 const MAX_HISTORY_POINTS = 3600;
 const SAMPLE_DISTANCE_SCALE = 100;
+const MIN_VALID_DISTANCE_CM = 25;
+const MIN_MOTION_CM_PER_10S = 0.1;
+const MAX_REASONABLE_VELOCITY_M_PER_MIN = 10;
+const SESSION_CONTINUE_MIN_VELOCITY_M_PER_MIN = 0.1;
 const CLOUD_SERVER_URL = "https://filtertrack-api.fly.dev/filtertrack/sessions";
 const LEGACY_LOCAL_SERVER_URL = "http://10.0.2.2:8080/filtertrack/sessions";
 const DEFAULT_SERVER_URL = CLOUD_SERVER_URL;
@@ -106,6 +111,7 @@ function saveText(key, value) {
 
 /* ===== DEVICE/FILTER HELPERS ===== */
 function normalizeDeviceName(name) { return String(name || "").trim(); }
+function normalizeDeviceAddress(address) { return String(address || "").trim().toUpperCase(); }
 function isUnknownDeviceName(name) {
   const n = normalizeDeviceName(name).toLowerCase();
   return !n || n === "unknown" || n === "desconhecido" || n === "n/a";
@@ -113,11 +119,30 @@ function isUnknownDeviceName(name) {
 function isFilterTrackName(name) {
   return normalizeDeviceName(name).toLowerCase().startsWith(FILTERTRACK_PREFIX);
 }
+function isFilterTrackV3Device(device) {
+  const compact = normalizeDeviceName(device && device.name).toLowerCase().replace(/[^a-z0-9]/g, "");
+  return compact.startsWith("filtertrackv3");
+}
+function shouldHideDeviceAddress(device) {
+  return isFilterTrackV3Device(device);
+}
 function isKnownDevice(device, knownDeviceMap) {
   if (!device) return false;
+  const address = normalizeDeviceAddress(device.address);
+  if (address && knownDeviceMap && knownDeviceMap[address]) return true;
   if (isUnknownDeviceName(device.name)) return false;
-  if (isFilterTrackName(device.name)) return true;
-  return !!knownDeviceMap[device.address];
+  return isFilterTrackName(device.name);
+}
+function getFilterNumber(filter) {
+  const name = normalizeDeviceName(filter && filter.name);
+  const m = name.match(/(?:FIL|FPR|FTF)[-\s]*0*(\d+)/i) || name.match(/\b0*(\d+)\b/);
+  return m ? String(Number(m[1])) : "";
+}
+function getFilterDirection(filter) {
+  const name = normalizeDeviceName(filter && filter.name).toLowerCase();
+  if (name.includes("asc")) return "Ascendente";
+  if (name.includes("desc")) return "Descendente";
+  return "";
 }
 function parseNumeric(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -281,19 +306,49 @@ function slopeMetersPerSecond(samples) {
   return (n * sxy - sx * sy) / d;
 }
 function computeFlowLpm(distanceSamples, areaM2, windowMs, nowTs) {
-  if (!Number.isFinite(areaM2) || areaM2 <= 0) return NaN;
-  if (!Array.isArray(distanceSamples) || distanceSamples.length < 2) return NaN;
+  const motion = computeWaterMotion(distanceSamples, windowMs, nowTs);
+  return computeFlowFromVelocityLpm(areaM2, motion.velocityMPerMin);
+}
+function computeFlowFromVelocityLpm(areaM2, velocityMPerMin) {
+  if (!Number.isFinite(areaM2) || areaM2 <= 0 || !Number.isFinite(velocityMPerMin)) return NaN;
+  return areaM2 * velocityMPerMin * 1000;
+}
+function computeWaterMotion(distanceSamples, windowMs, nowTs) {
+  const emptyMotion = (reason) => ({ velocityMPerMin: NaN, motionCm: NaN, reason });
+  if (!Array.isArray(distanceSamples) || distanceSamples.length < 2) return emptyMotion("Aguardando pelo menos 2 amostras.");
   const minTs = nowTs - windowMs;
   const samples = distanceSamples.filter(s => s.ts >= minTs);
-  if (samples.length < 2) return NaN;
+  if (samples.length < 2) return emptyMotion("Aguardando amostras recentes.");
+  const first = samples[0], last = samples[samples.length - 1];
+  if (!Number.isFinite(first.ts) || !Number.isFinite(last.ts)) return emptyMotion("Amostras sem tempo valido.");
+  if ((last.ts - first.ts) < windowMs * 0.9) return emptyMotion("Janela de 10s ainda incompleta.");
+  const motionCm = Number(last.distance) - Number(first.distance);
+  if (!Number.isFinite(motionCm)) return emptyMotion("Movimento invalido.");
+  if (Math.abs(motionCm) < MIN_MOTION_CM_PER_10S) return emptyMotion(`Movimento abaixo de ${MIN_MOTION_CM_PER_10S} cm em 10s.`);
   const slope = slopeMetersPerSecond(samples);
-  if (!Number.isFinite(slope)) return NaN;
-  return areaM2 * (-slope) * 60000;
+  if (!Number.isFinite(slope)) return emptyMotion("Inclinacao sem dados suficientes.");
+  const velocityMPerMin = -slope * 60;
+  if (!Number.isFinite(velocityMPerMin)) return emptyMotion("Velocidade invalida.");
+  if (Math.abs(velocityMPerMin) > MAX_REASONABLE_VELOCITY_M_PER_MIN) {
+    return emptyMotion(`Velocidade acima de ${MAX_REASONABLE_VELOCITY_M_PER_MIN} m/min.`);
+  }
+  return { velocityMPerMin, motionCm, reason: "Janela de 10s valida." };
+}
+function computeRawWaterMotion(distanceSamples, windowMs, nowTs) {
+  if (!Array.isArray(distanceSamples) || distanceSamples.length < 2) return NaN;
+  const minTs = nowTs - windowMs;
+  const samples = distanceSamples.filter(s => s.ts >= minTs && Number.isFinite(s.ts) && Number.isFinite(s.distance));
+  if (samples.length < 2) return NaN;
+  const first = samples[0], last = samples[samples.length - 1];
+  const motionCm = Number(last.distance) - Number(first.distance);
+  const slope = slopeMetersPerSecond(samples);
+  const velocityMPerMin = Number.isFinite(slope) ? -slope * 60 : NaN;
+  return { velocityMPerMin, motionCm };
 }
 function classifyFlow(flowLpm) {
   if (!Number.isFinite(flowLpm)) return { label: "Sem dados", tone: "neutral" };
-  if (flowLpm < -FLOW_EPSILON) return { label: "Descendo", tone: "success" };
-  if (flowLpm > FLOW_EPSILON) return { label: "Subindo", tone: "danger" };
+  if (flowLpm < -FLOW_EPSILON) return { label: "Descendo", tone: "danger" };
+  if (flowLpm > FLOW_EPSILON) return { label: "Subindo", tone: "success" };
   return { label: "Estável", tone: "neutral" };
 }
 function formatDuration(ms) {
@@ -405,6 +460,11 @@ const bridge = (() => {
     },
     onDataReceived(raw) {
       const parsed = parsePayload(raw); const ts = Date.now();
+      if (Number.isFinite(parsed.distance) && parsed.distance < MIN_VALID_DISTANCE_CM) {
+        state.rawLog = [...state.rawLog.slice(-149), String(raw || "")];
+        emit();
+        return;
+      }
       if (Number.isFinite(parsed.distance) && discardNextDistanceSample) { discardNextDistanceSample = false; return; }
       state.lastData = { distance: parsed.distance, error: parsed.error, raw: String(raw || ""), ts };
       if (Number.isFinite(parsed.distance)) {
@@ -415,6 +475,12 @@ const bridge = (() => {
     },
     onRssiUpdate(rssi) { state.rssi = Number(rssi) || state.rssi; emit(); },
     onError(message) {
+      if (/bluetooth desligado|ative o bluetooth|scanner ble indispon/i.test(String(message || ""))) {
+        state.scanning = false;
+        state.connected = false;
+        state.connectionStatus = "Disconnected";
+        state.lastData = null;
+      }
       state.errorMsg = String(message || "Erro BLE"); emit();
       clearTimeout(errorTimer);
       errorTimer = setTimeout(() => { state.errorMsg = ""; emit(); }, 5000);
@@ -432,6 +498,7 @@ const bridge = (() => {
     stopScan: () => callAndroid("stopScan"),
     connect: (address) => callAndroid("connect", String(address || "")),
     disconnect: () => callAndroid("disconnect"),
+    openBiDashboard: () => callAndroid("openBiDashboard"),
     sendCommand: (cmd) => {
       const command = String(cmd || "");
       if (command === "1") { clearReadingBuffers(); armFirstReadingDiscard(); emit(); }
@@ -537,6 +604,16 @@ function CageceMark({ size = 32 }) {
   );
 }
 
+function CageceLogo({ height = 30 }) {
+  return (
+    <img
+      src="logo_cagece.png"
+      alt="Cagece"
+      style={{ height, width: "auto", maxWidth: 104, display: "block", flexShrink: 0 }}
+    />
+  );
+}
+
 function Btn({ kind = "primary", size = "md", children, icon, iconRight, full, disabled, onClick, type = "button" }) {
   const h = size === "sm" ? 40 : size === "lg" ? 56 : 48;
   const px = size === "lg" ? "0 20px" : "0 16px";
@@ -574,8 +651,8 @@ function Btn({ kind = "primary", size = "md", children, icon, iconRight, full, d
   );
 }
 
-function Tile({ children, padding = 16, style }) {
-  return <div style={{ background: T.canvas, border: `1px solid ${T.hairline}`, padding, ...style }}>{children}</div>;
+function Tile({ children, padding = 16, style, ...props }) {
+  return <div {...props} style={{ background: T.canvas, border: `1px solid ${T.hairline}`, padding, ...style }}>{children}</div>;
 }
 
 function Tag({ tone = "neutral", children }) {
@@ -646,38 +723,39 @@ function AppHeader({ title, subtitle, right, onBack }) {
           </svg>
         </button>
       )}
-      <CageceMark size={32} />
+      <CageceLogo height={30} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 17, lineHeight: 1.2 }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 13, color: T.inkSubtle, lineHeight: 1.3 }}>{subtitle}</div>}
+        <div style={{ fontWeight: 600, fontSize: 17, lineHeight: 1.2, overflowWrap: "anywhere" }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 13, color: T.inkSubtle, lineHeight: 1.3, overflowWrap: "anywhere" }}>{subtitle}</div>}
       </div>
       {right}
     </header>
   );
 }
 
-function BottomTabs({ tab, onChange }) {
+function BottomTabs({ tab, onChange, onOpenData }) {
   const tabs = [
     { id: "monitor", label: "Monitor", icon: "M2 13h12M4 11l3-7 2 4 2-2 3 5" },
     { id: "sessions", label: "Sessões", icon: "M3 4h10M3 8h10M3 12h10" },
     { id: "filters", label: "Filtros", icon: "M2 4h12l-4 5v4l-4 1V9z" },
+    { id: "data", label: "Dados", icon: "M2 13h12M3 11h2V7H3v4zm4 0h2V4H7v7zm4 0h2V2h-2v9z" },
     { id: "settings", label: "Ajustes", icon: "M8 5a3 3 0 100 6 3 3 0 000-6zm0-3v2m0 8v2M2 8h2m8 0h2" },
   ];
   return (
-    <nav style={{ background: T.canvas, borderTop: `1px solid ${T.hairline}`, display: "flex", height: 64, flexShrink: 0 }}>
+    <nav style={{ background: T.canvas, borderTop: `1px solid ${T.hairline}`, display: "flex", height: 68, flexShrink: 0 }}>
       {tabs.map(t => (
-        <button key={t.id} onClick={() => onChange(t.id)}
+        <button key={t.id} onClick={() => t.id === "data" ? onOpenData?.() : onChange(t.id)}
           style={{
-            flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+            flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center",
             justifyContent: "center", gap: 4,
             color: tab === t.id ? T.blue : T.inkMuted,
             borderTop: tab === t.id ? `3px solid ${T.blue}` : "3px solid transparent",
-            marginTop: -1, fontSize: 12, letterSpacing: 0.32,
+            marginTop: -1, fontSize: 11, letterSpacing: 0.16, overflow: "hidden",
           }}>
-          <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
             <path d={t.icon} stroke="currentColor" strokeWidth="1.4" strokeLinecap="square" />
           </svg>
-          <span>{t.label}</span>
+          <span style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
         </button>
       ))}
     </nav>
@@ -685,23 +763,27 @@ function BottomTabs({ tab, onChange }) {
 }
 
 /* ===== CONNECT SCREEN ===== */
-function ConnectScreen({ ble }) {
+function ConnectScreen({ ble, autoConnectDevice, isPreferredDevice = () => false, scanPaused = false, manualDeviceChoice = false }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <AppHeader title="FilterTrack" subtitle="Cagece · Saneamento" />
       <div style={{ flex: 1, overflow: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: 20, background: T.surface1 }}>
         <div>
-          <div style={{ fontSize: 13, color: T.inkMuted, letterSpacing: 0.32, marginBottom: 6, textTransform: "uppercase" }}>ETAPA 01</div>
-          <h2 style={{ fontSize: 28, fontWeight: 300, letterSpacing: -0.2, lineHeight: 1.2, marginBottom: 8 }}>Conectar dispositivo</h2>
-          <p style={{ fontSize: 15, color: T.inkMuted }}>Procure o sensor BLE FilterTrack instalado na ETA.</p>
+          <h2 style={{ fontSize: 28, fontWeight: 300, letterSpacing: 0, lineHeight: 1.2, marginBottom: 8 }}>Conectar dispositivo</h2>
+          <p style={{ fontSize: 15, color: T.inkMuted }}>
+            {manualDeviceChoice
+              ? "Mais de um sensor FilterTrackV3 foi encontrado. Escolha manualmente qual sensor conectar."
+              : "O app procura e conecta automaticamente ao sensor BLE FilterTrack instalado na ETA."}
+          </p>
         </div>
 
+        {manualDeviceChoice ? <StatusInline kind="warning">Toque no sensor correto para continuar. A conexao automatica fica pausada enquanto houver mais de um FilterTrackV3 visivel.</StatusInline> : null}
         {ble.errorMsg ? <StatusInline kind="danger">{ble.errorMsg}</StatusInline> : null}
 
-        {!ble.scanning && ble.devices.length === 0 && (
+        {!ble.scanning && (
           <Btn kind="primary" size="lg" full onClick={ble.startScan}
             iconRight={<svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" /></svg>}>
-            Procurar dispositivos
+            {scanPaused ? "Retomar busca" : "Procurar dispositivos"}
           </Btn>
         )}
 
@@ -710,8 +792,10 @@ function ConnectScreen({ ble }) {
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <Spinner size={20} />
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 500, fontSize: 16 }}>Procurando...</div>
-                <div style={{ fontSize: 13, color: T.inkSubtle }}>BLE Bluetooth Low Energy</div>
+                <div style={{ fontWeight: 500, fontSize: 16 }}>{autoConnectDevice ? "Conectando..." : "Procurando..."}</div>
+                <div style={{ fontSize: 13, color: T.inkSubtle }}>
+                  {autoConnectDevice ? (autoConnectDevice.name || autoConnectDevice.address) : "Dispositivos BLE FilterTrack"}
+                </div>
               </div>
               <Btn kind="ghost" size="sm" onClick={ble.stopScan}>Parar</Btn>
             </div>
@@ -724,7 +808,10 @@ function ConnectScreen({ ble }) {
               {ble.devices.length} dispositivo{ble.devices.length > 1 ? "s" : ""} encontrado{ble.devices.length > 1 ? "s" : ""}
             </div>
             <Tile padding={0}>
-              {ble.devices.map((d, i) => (
+              {ble.devices.map((d, i) => {
+                const preferred = !manualDeviceChoice && isPreferredDevice(d);
+                const hideAddress = shouldHideDeviceAddress(d);
+                return (
                 <button key={d.address} onClick={() => ble.connect(d.address)}
                   style={{
                     width: "100%", padding: "16px 16px", display: "flex", alignItems: "center", gap: 14,
@@ -738,22 +825,20 @@ function ConnectScreen({ ble }) {
                     </svg>
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, fontSize: 16 }}>{d.name}</div>
-                    <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle }}>{d.address}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 500, fontSize: 16, overflowWrap: "anywhere" }}>{d.name}</span>
+                      {preferred && <Tag tone="blue">Escolha esse</Tag>}
+                    </div>
+                    {!hideAddress && <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle, overflowWrap: "anywhere" }}>{d.address}</div>}
                   </div>
                   <SignalBars rssi={d.rssi} />
                 </button>
-              ))}
+                );
+              })}
             </Tile>
           </div>
         )}
 
-        {!ble.scanning && (
-          <StatusInline kind="info">
-            O sensor FilterTrack expõe o serviço BLE{" "}
-            <span style={{ fontFamily: T.mono }}>0x00FF</span>. Mantenha o app aberto durante a coleta.
-          </StatusInline>
-        )}
       </div>
     </div>
   );
@@ -775,13 +860,13 @@ function FlowChart({ history }) {
       g.fillStyle = T.inkTertiary; g.font = "14px IBM Plex Sans"; g.textAlign = "center";
       g.fillText("Aguardando dados...", W / 2, H / 2); return;
     }
-    const pad = { l: 44, r: 12, t: 12, b: 24 };
+    const pad = { l: 48, r: 12, t: 12, b: 24 };
     const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
-    const ts = sampled.map(p => p.ts), ds = sampled.map(p => p.distanceCm);
+    const ts = sampled.map(p => p.ts), vs = sampled.map(p => p.velocityMpm);
     const tMin = ts[0], tMax = ts[ts.length - 1];
-    const dMin = Math.min(...ds), dMax = Math.max(...ds);
-    const dPad = Math.max(0.5, (dMax - dMin) * 0.2);
-    const yMin = dMin - dPad, yMax = dMax + dPad;
+    const vMin = Math.min(...vs), vMax = Math.max(...vs);
+    const vPad = Math.max(0.05, (vMax - vMin) * 0.2);
+    const yMin = vMin - vPad, yMax = vMax + vPad;
     const x = i => pad.l + (ts[i] - tMin) / (tMax - tMin || 1) * cw;
     const y = v => pad.t + (1 - (v - yMin) / (yMax - yMin || 1)) * ch;
     g.strokeStyle = T.hairline; g.lineWidth = 1;
@@ -794,7 +879,7 @@ function FlowChart({ history }) {
     }
     g.strokeStyle = T.blue; g.lineWidth = 2; g.beginPath();
     sampled.forEach((p, i) => {
-      const px = x(i), py = y(p.distanceCm);
+      const px = x(i), py = y(p.velocityMpm);
       if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
     });
     g.stroke();
@@ -808,26 +893,103 @@ function FlowChart({ history }) {
   return <canvas ref={ref} style={{ width: "100%", height: 180, display: "block" }} />;
 }
 
+function DistanceDebugChart({ history }) {
+  const ref = useRef(null);
+  const sampled = useMemo(() => downsample((history || []).filter(p => Number.isFinite(p.distance)), 220), [history]);
+  useEffect(() => {
+    const c = ref.current; if (!c) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = c.clientWidth, H = c.clientHeight;
+    if (!W || !H) return;
+    c.width = W * dpr; c.height = H * dpr;
+    const g = c.getContext("2d"); g.scale(dpr, dpr);
+    g.clearRect(0, 0, W, H); g.fillStyle = T.canvas; g.fillRect(0, 0, W, H);
+    if (sampled.length < 2) {
+      g.fillStyle = T.inkTertiary; g.font = "13px IBM Plex Sans"; g.textAlign = "center";
+      g.fillText("Sem amostras de distância", W / 2, H / 2); return;
+    }
+    const pad = { l: 42, r: 10, t: 10, b: 22 };
+    const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+    const ts = sampled.map(p => p.ts), ds = sampled.map(p => p.distance);
+    const tMin = ts[0], tMax = ts[ts.length - 1];
+    const dMin = Math.min(...ds), dMax = Math.max(...ds);
+    const dPad = Math.max(1, (dMax - dMin) * 0.2);
+    const yMin = dMin - dPad, yMax = dMax + dPad;
+    const x = i => pad.l + (ts[i] - tMin) / (tMax - tMin || 1) * cw;
+    const y = v => pad.t + (1 - (v - yMin) / (yMax - yMin || 1)) * ch;
+    g.strokeStyle = T.hairline; g.lineWidth = 1;
+    for (let i = 0; i <= 3; i++) {
+      const yy = pad.t + (i / 3) * ch;
+      g.beginPath(); g.moveTo(pad.l, yy); g.lineTo(W - pad.r, yy); g.stroke();
+      const v = yMax - (i / 3) * (yMax - yMin);
+      g.fillStyle = T.inkSubtle; g.font = "10px IBM Plex Mono"; g.textAlign = "right";
+      g.fillText(v.toFixed(1), pad.l - 5, yy + 4);
+    }
+    g.strokeStyle = T.teal; g.lineWidth = 2; g.beginPath();
+    sampled.forEach((p, i) => {
+      const px = x(i), py = y(p.distance);
+      if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+    });
+    g.stroke();
+    g.fillStyle = T.inkSubtle; g.font = "10px IBM Plex Mono";
+    g.textAlign = "left"; g.fillText(`-${Math.round((tMax - tMin) / 1000)}s`, pad.l, H - 6);
+    g.textAlign = "right"; g.fillText("agora", W - pad.r, H - 6);
+  }, [sampled]);
+  return <canvas ref={ref} style={{ width: "100%", height: 150, display: "block" }} />;
+}
+
 /* ===== MONITOR TAB ===== */
-function MonitorTab({ ble, filter, filteredDistance, flowInstant, flowHistory, activeSessionMeta, onPickFilter, onStartSession }) {
+function MonitorTab({ ble, filter, flowVelocity, flowInstant, flowHistory, flowReason, flowWaitSeconds = 0, activeSessionMeta, onPickFilter, onStartSession }) {
   const [sessionNow, setSessionNow] = useState(Date.now());
+  const [flowUnit, setFlowUnit] = useState("lpm");
   useEffect(() => { const id = setInterval(() => setSessionNow(Date.now()), 1000); return () => clearInterval(id); }, []);
   const flowClass = classifyFlow(flowInstant);
+  const velocityClass = classifyFlow(flowVelocity);
+  const flowValue = flowUnit === "lpm" ? Math.abs(flowInstant) : Math.abs(flowInstant * 0.06);
+  const flowLabel = flowUnit === "lpm" ? "L/min" : "m3/h";
+  const flowDecimals = flowUnit === "lpm" ? 1 : 2;
+  const hasFlowVelocity = Number.isFinite(flowVelocity);
+  const hasFlow = hasFlowVelocity && Number.isFinite(flowInstant);
+  const collecting = !hasFlowVelocity && Number(flowWaitSeconds) > 0;
+  const velocityReason = String(flowReason || "Aguardando janela de 10s.").trim();
+  const unavailableText = collecting ? `Coletando dados (${Math.max(0, Math.ceil(Number(flowWaitSeconds)))}s)` : velocityReason;
+  const flowUnavailableText = !hasFlowVelocity
+    ? unavailableText
+    : (!filter || !Number.isFinite(Number(filter.areaM2)) ? "Área do filtro indisponível." : "Vazão indisponível.");
+  const deviceDisplay = { name: ble.deviceName, address: ble.deviceAddress };
+  const hideDeviceAddress = shouldHideDeviceAddress(deviceDisplay);
   const chartHistory = useMemo(() =>
-    flowHistory.filter(p => Number.isFinite(p.distanceCm)).map(p => ({ ts: p.ts, distanceCm: p.distanceCm })),
+    flowHistory.filter(p => Number.isFinite(p.velocityMpm)).map(p => ({ ts: p.ts, velocityMpm: p.velocityMpm })),
     [flowHistory]);
   const sessionRunning = !!activeSessionMeta;
+  const filterNumber = getFilterNumber(filter);
+  const filterDirection = getFilterDirection(filter);
+  const metricTileStyle = { minHeight: 132, display: "grid", gridTemplateRows: "34px 1fr minmax(28px, auto)" };
+  const metricLabelStyle = { fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", lineHeight: 1.25 };
+  const metricValueStyle = { fontFamily: T.mono, fontSize: 27, fontWeight: 400, lineHeight: 1, letterSpacing: 0, whiteSpace: "nowrap", alignSelf: "center" };
+  const renderUnavailableStatus = () => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {collecting && <Spinner size={14} />}
+      <span>{unavailableText}</span>
+    </div>
+  );
+  const renderFlowUnavailableStatus = () => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {collecting && <Spinner size={14} />}
+      <span>{flowUnavailableText}</span>
+    </div>
+  );
   return (
     <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, background: T.surface1 }}>
       {/* Connection bar */}
       <Tile padding={14} style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ width: 10, height: 10, background: T.success, borderRadius: 10, flexShrink: 0, boxShadow: `0 0 0 4px ${T.success}22` }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 500, fontSize: 15 }}>{ble.deviceName || ble.deviceAddress}</div>
-          <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle }}>{ble.deviceAddress}</div>
+          <div style={{ fontWeight: 500, fontSize: 15, overflowWrap: "anywhere" }}>{ble.deviceName || ble.deviceAddress}</div>
+          {!hideDeviceAddress && <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle, overflowWrap: "anywhere" }}>{ble.deviceAddress}</div>}
         </div>
         <SignalBars rssi={ble.rssi} />
-        <button onClick={ble.disconnect} style={{ fontSize: 14, color: T.blue, padding: "4px 8px" }}>Desconectar</button>
+        <button onClick={ble.disconnect} style={{ fontSize: 14, color: T.blue, padding: "4px 6px", flexShrink: 0 }}>Desconectar</button>
       </Tile>
 
       {/* Filter chooser */}
@@ -836,8 +998,11 @@ function MonitorTab({ ble, filter, filteredDistance, flowInstant, flowHistory, a
           <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 6 }}>Filtro selecionado</div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 18, fontWeight: 500, lineHeight: 1.2 }}>{filter.name}</div>
-              <div style={{ fontSize: 14, color: T.inkMuted, marginTop: 2 }}>{filter.station}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {filterNumber && <Tag tone="blue">Filtro {filterNumber}</Tag>}
+                {filterDirection && <Tag>{filterDirection}</Tag>}
+              </div>
+              <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 10, overflowWrap: "anywhere" }}>{filter.location}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 <Tag tone="blue">{filter.businessUnit}</Tag>
                 <Tag>Área {formatAreaLabel(filter.areaM2)}</Tag>
@@ -860,33 +1025,37 @@ function MonitorTab({ ble, filter, filteredDistance, flowInstant, flowHistory, a
 
       {/* Big metrics */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <Tile padding={16}>
-          <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 8 }}>Distância</div>
-          <div style={{ fontFamily: T.mono, fontSize: 36, fontWeight: 400, lineHeight: 1, letterSpacing: -0.5 }}>
-            {Number.isFinite(filteredDistance) ? filteredDistance.toFixed(1) : "--"}
-            <span style={{ fontSize: 16, color: T.inkSubtle, marginLeft: 6 }}>cm</span>
+        <Tile padding={16} style={metricTileStyle}>
+          <div style={metricLabelStyle}>Velocidade de subida</div>
+          <div style={metricValueStyle}>
+            {hasFlowVelocity ? Math.abs(flowVelocity).toFixed(2) : "--"}
+            <span style={{ fontSize: 13, color: T.inkSubtle, marginLeft: 4 }}>m/min</span>
           </div>
-          <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 8 }}>sensor à lâmina</div>
+          <div style={{ fontSize: hasFlowVelocity ? 13 : 12, color: T.inkSubtle, alignSelf: "end", lineHeight: 1.25 }}>
+            {hasFlowVelocity ? <Tag tone={velocityClass.tone}>{velocityClass.label}</Tag> : renderUnavailableStatus()}
+          </div>
         </Tile>
-        <Tile padding={16}>
-          <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 8 }}>Vazão</div>
+        <Tile padding={0} style={{ ...metricTileStyle, cursor: "pointer" }}>
+          <button onClick={() => setFlowUnit(u => u === "lpm" ? "m3h" : "lpm")} style={{ width: "100%", height: "100%", padding: 16, display: "grid", gridTemplateRows: "34px 1fr minmax(28px, auto)", textAlign: "left" }}>
+          <div style={metricLabelStyle}>Vazão</div>
           <div style={{
-            fontFamily: T.mono, fontSize: 36, fontWeight: 400, lineHeight: 1, letterSpacing: -0.5,
-            color: flowClass.tone === "danger" ? T.danger : flowClass.tone === "success" ? T.success : T.ink,
+            ...metricValueStyle,
+            color: hasFlow && flowClass.tone === "danger" ? T.danger : hasFlow && flowClass.tone === "success" ? T.success : T.ink,
           }}>
-            {Number.isFinite(flowInstant) ? Math.abs(flowInstant).toFixed(2) : "--"}
-            <span style={{ fontSize: 16, color: T.inkSubtle, marginLeft: 6 }}>L/min</span>
+            {hasFlow ? flowValue.toFixed(flowDecimals) : "--"}
+            <span style={{ fontSize: 13, color: T.inkSubtle, marginLeft: 4 }}>{flowLabel}</span>
           </div>
-          <div style={{ fontSize: 13, marginTop: 8 }}>
-            <Tag tone={flowClass.tone}>{flowClass.label}</Tag>
+          <div style={{ fontSize: 12, color: T.inkSubtle, alignSelf: "end", lineHeight: 1.25 }}>
+            {hasFlow ? "Toque para alternar" : renderFlowUnavailableStatus()}
           </div>
+          </button>
         </Tile>
       </div>
 
       {/* Chart */}
       <Tile padding={0} style={{ overflow: "hidden" }}>
         <div style={{ padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${T.hairline}` }}>
-          <div style={{ fontSize: 14, fontWeight: 500 }}>Lâmina d’água</div>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>Velocidade de subida</div>
           <Tag tone="blue">tempo real</Tag>
         </div>
         <FlowChart history={chartHistory} />
@@ -991,7 +1160,7 @@ function FiltersTab({ filters, onPick }) {
   const [q, setQ] = useState("");
   const filtered = useMemo(() => filterFiltersByName(filters, q), [filters, q]);
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", background: T.surface1 }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: T.surface1 }}>
       <div style={{ padding: "12px 16px", background: T.canvas, borderBottom: `1px solid ${T.hairline}` }}>
         <input placeholder="Buscar filtro, ETA ou município..." value={q}
           onChange={e => setQ(e.target.value)}
@@ -1004,7 +1173,7 @@ function FiltersTab({ filters, onPick }) {
       <div style={{ padding: "8px 16px", fontSize: 13, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>
         {filtered.length} de {filters.length} filtros
       </div>
-      <div style={{ flex: 1, overflow: "auto" }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         <Tile padding={0} style={{ margin: "0 16px 16px" }}>
           {filtered.length === 0 && (
             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 14, color: T.inkSubtle }}>Nenhum filtro encontrado</div>
@@ -1019,8 +1188,8 @@ function FiltersTab({ filters, onPick }) {
               onMouseEnter={e => e.currentTarget.style.background = T.surface1}
               onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: 15 }}>{f.name}</div>
-                <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 2 }}>{f.station} · {f.location}</div>
+                <div style={{ fontWeight: 500, fontSize: 15, overflowWrap: "anywhere" }}>{f.name}</div>
+                <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 2, overflowWrap: "anywhere" }}>{f.station} · {f.location}</div>
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <div style={{ fontFamily: T.mono, fontSize: 14 }}>{formatAreaLabel(f.areaM2)}</div>
@@ -1034,13 +1203,186 @@ function FiltersTab({ filters, onPick }) {
   );
 }
 
+function ConfirmDialog({ action, onCancel, onConfirm }) {
+  if (!action) return null;
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 100,
+        background: "rgba(22,22,22,0.42)", display: "flex",
+        alignItems: "center", justifyContent: "center", padding: 20,
+      }}
+      onClick={onCancel}
+    >
+      <Tile padding={0} style={{ width: "100%", maxWidth: 360, boxShadow: "0 12px 32px rgba(0,0,0,0.18)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: 18, borderBottom: `1px solid ${T.hairline}` }}>
+          <div style={{ fontSize: 18, fontWeight: 500, lineHeight: 1.25 }}>{action.title}</div>
+          <div style={{ fontSize: 14, color: T.inkMuted, marginTop: 8, lineHeight: 1.45 }}>{action.message}</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 12 }}>
+          <Btn kind="ghost" full onClick={onCancel}>Cancelar</Btn>
+          <Btn kind={action.tone || "primary"} full onClick={onConfirm}>{action.confirmLabel || "Confirmar"}</Btn>
+        </div>
+      </Tile>
+    </div>
+  );
+}
+
+function ConnectionIssueDialog({ issue, onRestartDevice, onWait, onRestartApp }) {
+  if (!issue) return null;
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 110,
+        background: "rgba(22,22,22,0.46)", display: "flex",
+        alignItems: "center", justifyContent: "center", padding: 20,
+      }}
+    >
+      <Tile padding={0} style={{ width: "100%", maxWidth: 380, boxShadow: "0 12px 32px rgba(0,0,0,0.22)" }}>
+        <div style={{ padding: 18, borderBottom: `1px solid ${T.hairline}` }}>
+          <div style={{ fontSize: 18, fontWeight: 500, lineHeight: 1.25 }}>{issue.title}</div>
+          <div style={{ fontSize: 14, color: T.inkMuted, marginTop: 8, lineHeight: 1.45 }}>{issue.message}</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, padding: 12 }}>
+          <Btn kind="danger" full onClick={onRestartDevice}>Tentar reiniciar sensor</Btn>
+          <Btn kind="tertiary" full onClick={onWait}>Aguardar</Btn>
+          <Btn kind="ghost" full onClick={onRestartApp}>Reiniciar app</Btn>
+        </div>
+      </Tile>
+    </div>
+  );
+}
+
+function DebugPanel({ ble, debugInfo }) {
+  const rawLines = Array.isArray(ble?.rawLog) ? ble.rawLog.slice(-18).reverse() : [];
+  const distanceSamples = Array.isArray(ble?.distanceSamples) ? ble.distanceSamples : [];
+  const lastDistance = ble?.lastData && Number.isFinite(ble.lastData.distance) ? ble.lastData.distance : NaN;
+  const rows = [
+    ["Distância ESP", `${fmtNum(lastDistance, 2)} cm`],
+    ["Pós-processamento", `${fmtNum(debugInfo?.filteredDistance, 2)} cm`],
+    ["Velocidade", `${fmtNum(debugInfo?.velocityMpm, 4)} m/min`],
+    ["Vazão 10s", `${fmtNum(debugInfo?.flow10, 3)} L/min`],
+    ["Velocidade sem filtros", `${fmtNum(debugInfo?.rawVelocityMpm, 4)} m/min`],
+    ["Vazão sem filtros", `${fmtNum(debugInfo?.rawFlow10, 3)} L/min`],
+    ["Movimento 10s", `${fmtNum(debugInfo?.motionCm, 3)} cm`],
+    ["Movimento sem filtros", `${fmtNum(debugInfo?.rawMotionCm, 3)} cm`],
+    ["Amostras 2s", String(debugInfo?.recentCount ?? 0)],
+    ["Buffer filtrado", String(debugInfo?.bufferCount ?? 0)],
+  ];
+  return (
+    <Tile padding={16}>
+      <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Debug</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: T.hairline, marginBottom: 12 }}>
+        {rows.map(([k, v]) => (
+          <div key={k} style={{ background: T.canvas, padding: 10, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: T.inkSubtle, textTransform: "uppercase", letterSpacing: 0.32 }}>{k}</div>
+            <div style={{ fontFamily: T.mono, fontSize: 13, marginTop: 4, overflowWrap: "anywhere" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ border: `1px solid ${T.hairline}`, marginBottom: 12 }}>
+        <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.hairline}`, fontSize: 13, fontWeight: 500 }}>Distância</div>
+        <DistanceDebugChart history={distanceSamples} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 12, color: T.inkMuted, textTransform: "uppercase", letterSpacing: 0.32, marginBottom: 6 }}>Processamento usado</div>
+          <div style={{ fontFamily: T.mono, fontSize: 11, color: T.inkMuted, lineHeight: 1.45, background: T.surface1, padding: 10, overflowWrap: "anywhere" }}>
+            parsePayload - descarta &lt; {MIN_VALID_DISTANCE_CM} cm - ignora primeira leitura - filtro robusto 2s mediana/MAD - janela 10s - movimento minimo {MIN_MOTION_CM_PER_10S} cm - limite {MAX_REASONABLE_VELOCITY_M_PER_MIN} m/min
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: T.inkMuted, textTransform: "uppercase", letterSpacing: 0.32, marginBottom: 6 }}>Raw ESP</div>
+          <pre style={{ margin: 0, maxHeight: 180, overflow: "auto", WebkitOverflowScrolling: "touch", fontFamily: T.mono, fontSize: 11, lineHeight: 1.4, background: T.surface1, padding: 10, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {rawLines.length ? rawLines.join("\n") : "Sem payload raw"}
+          </pre>
+        </div>
+      </div>
+    </Tile>
+  );
+}
+
 /* ===== SETTINGS TAB ===== */
-function SettingsTab({ serverUrl, setServerUrl }) {
+function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSession, onRestartSensor, debugMode, setDebugMode, debugInfo }) {
   const [url, setUrl] = useState(serverUrl);
   const [saved, setSaved] = useState(false);
+  const [commandStatus, setCommandStatus] = useState("");
+  const [confirmAction, setConfirmAction] = useState(null);
   const save = () => { setServerUrl(url); setSaved(true); setTimeout(() => setSaved(false), 2000); };
+  const sendSensorCommand = (cmd, label) => {
+    if (!ble?.connected) {
+      setCommandStatus("Conecte um sensor para enviar comandos.");
+      return;
+    }
+    const ok = ble.sendCommand(String(cmd));
+    setCommandStatus(ok === false ? "Falha ao enviar comando." : `${label} enviado.`);
+  };
+  const enableLowPower = () => {
+    setConfirmAction({
+      title: "Ativar baixo consumo",
+      message: "A sessão atual será encerrada e salva localmente antes do comando ser enviado.",
+      confirmLabel: "Ativar",
+      tone: "secondary",
+      onConfirm: () => {
+        if (activeSessionMeta) onEndSession?.("low_power", true);
+        sendSensorCommand(1, "Baixo consumo");
+      },
+    });
+  };
+  const restartSensor = () => {
+    setConfirmAction({
+      title: "Reiniciar sensor",
+      message: "A sessão atual será encerrada antes do comando. O sensor pode desconectar por alguns segundos; o app continuará procurando e, se reconectar automaticamente, manterá o filtro atual sem abrir a seleção de filtros.",
+      confirmLabel: "Reiniciar",
+      tone: "danger",
+      onConfirm: () => {
+        if (activeSessionMeta) onEndSession?.("restart_sensor", true);
+        const ok = onRestartSensor ? onRestartSensor() : ble?.sendCommand?.("0");
+        setCommandStatus(ok === false ? "Falha ao enviar comando." : "Reinício enviado. Aguardando reconexão automática.");
+      },
+    });
+  };
+  const runConfirmedAction = () => {
+    const action = confirmAction;
+    setConfirmAction(null);
+    action?.onConfirm?.();
+  };
   return (
+    <>
     <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 16, background: T.surface1 }}>
+      <Tile padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Sensor</div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
+          Comandos BLE para o firmware FilterTrackV3.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+          <Btn kind="tertiary" full disabled={!ble?.connected} onClick={() => sendSensorCommand(2, "Leitura normal")}>
+            Leitura normal
+          </Btn>
+          <Btn kind="secondary" full disabled={!ble?.connected} onClick={enableLowPower}>
+            Baixo consumo
+          </Btn>
+          <Btn kind="danger" full disabled={!ble?.connected} onClick={restartSensor}>
+            Reiniciar sensor
+          </Btn>
+        </div>
+        <div style={{ fontSize: 12, color: T.inkSubtle, marginTop: 10 }}>
+          {commandStatus || (ble?.connected ? "Sensor conectado." : "Nenhum sensor conectado.")}
+        </div>
+      </Tile>
+
+      <Tile padding={16}>
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
+          <span>
+            <span style={{ display: "block", fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>Modo debug</span>
+            <span style={{ display: "block", fontSize: 13, color: T.inkSubtle, marginTop: 4 }}>Distância, raw ESP e processamento interno.</span>
+          </span>
+          <input type="checkbox" checked={!!debugMode} onChange={e => setDebugMode?.(e.target.checked)} style={{ width: 22, height: 22, flexShrink: 0 }} />
+        </label>
+      </Tile>
+
+      {debugMode && <DebugPanel ble={ble} debugInfo={debugInfo} />}
+
       <Tile padding={16}>
         <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Servidor</div>
         <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 10 }}>Endpoint para envio das sessões coletadas.</div>
@@ -1074,14 +1416,30 @@ function SettingsTab({ serverUrl, setServerUrl }) {
         ))}
       </Tile>
     </div>
+    <ConfirmDialog action={confirmAction} onCancel={() => setConfirmAction(null)} onConfirm={runConfirmedAction} />
+    </>
   );
 }
 
 /* ===== FILTER PICKER OVERLAY ===== */
-function FilterPickerOverlay({ filters, onPick, onClose }) {
+function FilterPickerOverlay({ filters, suggestedFilter, onPick, onClose }) {
   return (
-    <div style={{ position: "absolute", inset: 0, background: T.canvas, display: "flex", flexDirection: "column", zIndex: 20 }}>
+    <div style={{ position: "absolute", inset: 0, background: T.canvas, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", zIndex: 20 }}>
       <AppHeader title="Selecionar filtro" subtitle="Catálogo Cagece" onBack={onClose} />
+      {suggestedFilter && (
+        <div style={{ padding: "12px 16px", background: T.surface1, borderBottom: `1px solid ${T.hairline}` }}>
+          <Tile padding={14}>
+            <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 8 }}>Último usado</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 15, overflowWrap: "anywhere" }}>{suggestedFilter.name}</div>
+                <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 2, overflowWrap: "anywhere" }}>{suggestedFilter.station}</div>
+              </div>
+              <Btn kind="primary" size="sm" onClick={() => { onPick(suggestedFilter); onClose(); }}>Usar</Btn>
+            </div>
+          </Tile>
+        </div>
+      )}
       <FiltersTab filters={filters} onPick={f => { onPick(f); onClose(); }} />
     </div>
   );
@@ -1103,33 +1461,84 @@ function App() {
   const [picking, setPicking] = useState(false);
   const [flowHistory, setFlowHistory] = useState([]);
   const [flowInstant, setFlowInstant] = useState(NaN);
-  const [filteredDistance, setFilteredDistance] = useState(NaN);
+  const [flowVelocity, setFlowVelocity] = useState(NaN);
+  const [flowReason, setFlowReason] = useState("Aguardando janela de 10s.");
+  const [flowWaitSeconds, setFlowWaitSeconds] = useState(10);
+  const [debugMode, setDebugMode] = useState(() => loadText(STORAGE.debugMode, "") === "1");
+  const [debugInfo, setDebugInfo] = useState({});
   const [activeSessionMeta, setActiveSessionMeta] = useState(null);
   const [syncState, setSyncState] = useState(() => ({
     status: "idle", pendingCount: readPendingSessions().length,
     message: "", lastSuccessAt: loadText(STORAGE.lastSyncAt, ""),
   }));
   const [pendingFilterChoice, setPendingFilterChoice] = useState(false);
+  const [scanPaused, setScanPaused] = useState(false);
+  const [connectionIssue, setConnectionIssue] = useState(null);
 
   const selectedFilter = useMemo(() => filters.find(f => f.id === selectedFilterId) || null, [filters, selectedFilterId]);
+  const knownDeviceMap = useMemo(() => {
+    const map = {};
+    (Array.isArray(knownDevices) ? knownDevices : []).forEach(d => {
+      const address = normalizeDeviceAddress(d && d.address);
+      if (address) map[address] = d;
+    });
+    return map;
+  }, [knownDevices]);
+  const autoConnectDevice = useMemo(() => {
+    const devices = Array.isArray(ble.devices) ? ble.devices : [];
+    const v3Count = devices.filter(isFilterTrackV3Device).length;
+    if (v3Count > 1) return null;
+    return devices.find(d => isKnownDevice(d, knownDeviceMap)) || null;
+  }, [ble.devices, knownDeviceMap]);
+  const manualDeviceChoice = useMemo(() => {
+    const devices = Array.isArray(ble.devices) ? ble.devices : [];
+    return devices.filter(isFilterTrackV3Device).length > 1;
+  }, [ble.devices]);
 
   const activeSessionRef = useRef(null);
   const processedSampleTsRef = useRef(0);
   const lastPersistRef = useRef(0);
   const prevConnectedRef = useRef(false);
   const startupDoneRef = useRef(false);
+  const autoConnectAttemptsRef = useRef({});
+  const scanPausedRef = useRef(false);
+  const manualDisconnectRef = useRef(false);
+  const suppressNextDisconnectIssueRef = useRef(false);
+  const restartReconnectNoPickerRef = useRef(false);
+  const pendingRestartAfterReconnectRef = useRef(false);
+  const pendingRestartAttemptsRef = useRef(0);
+  const continueSessionAfterReconnectRef = useRef(false);
   const bleRef = useRef(ble);
   const selectedFilterRef = useRef(null);
   const filteredSamplesRef = useRef([]);
   const lastInstantUpdateRef = useRef(0);
   const sessionStartRef = useRef(null);
+  const flowWindowStartMsRef = useRef(0);
+  const lastValidVelocityRef = useRef({ value: NaN, ts: 0 });
+  const lastWindowVelocitySignRef = useRef(null);
 
   useEffect(() => { bleRef.current = ble; }, [ble]);
+  useEffect(() => { scanPausedRef.current = scanPaused; }, [scanPaused]);
   useEffect(() => { selectedFilterRef.current = selectedFilter; }, [selectedFilter]);
   useEffect(() => { saveJson(STORAGE.filters, filters); }, [filters]);
   useEffect(() => { if (selectedFilterId) saveText(STORAGE.selectedFilterId, selectedFilterId); }, [selectedFilterId]);
   useEffect(() => { saveJson(STORAGE.knownDevices, knownDevices); }, [knownDevices]);
   useEffect(() => { saveText(STORAGE.serverUrl, serverUrl); }, [serverUrl]);
+  useEffect(() => { saveText(STORAGE.debugMode, debugMode ? "1" : "0"); }, [debugMode]);
+
+  const resetFlowMetrics = useCallback((reason = "Coletando dados.") => {
+    setFlowHistory([]);
+    setFlowInstant(NaN);
+    setFlowVelocity(NaN);
+    setFlowReason(reason);
+    setFlowWaitSeconds(10);
+    filteredSamplesRef.current = [];
+    lastInstantUpdateRef.current = 0;
+    sessionStartRef.current = null;
+    flowWindowStartMsRef.current = Date.now();
+    lastValidVelocityRef.current = { value: NaN, ts: 0 };
+    lastWindowVelocitySignRef.current = null;
+  }, []);
 
   const persistActiveSession = useCallback((force = false) => {
     if (!activeSessionRef.current) return;
@@ -1139,16 +1548,20 @@ function App() {
     saveJson(STORAGE.activeSession, activeSessionRef.current);
   }, []);
 
-  const finalizeSession = useCallback((reason) => {
+  const finalizeSession = useCallback((reason, forceSave = false) => {
     const session = activeSessionRef.current; if (!session) return;
     const finalSession = { ...session, endedAt: nowIso(), endReason: reason || "unknown" };
-    if (sampleSeriesCount(finalSession.samples) > 0) {
+    if (forceSave || sampleSeriesCount(finalSession.samples) > 0) {
       const pendingCount = enqueueSession(finalSession);
       setSyncState(s => ({ ...s, pendingCount, status: "queued", message: `Sessão salva. ${pendingCount} pendente(s).` }));
       syncSessions(serverUrl, setSyncState, "session-end");
     }
     activeSessionRef.current = null; setActiveSessionMeta(null);
-    setFlowHistory([]); processedSampleTsRef.current = 0;
+    setFlowHistory([]); setFlowInstant(NaN); setFlowVelocity(NaN); setFlowReason("Aguardando janela de 10s."); setFlowWaitSeconds(10);
+    processedSampleTsRef.current = 0;
+    filteredSamplesRef.current = []; lastInstantUpdateRef.current = 0; sessionStartRef.current = null; flowWindowStartMsRef.current = 0;
+    lastValidVelocityRef.current = { value: NaN, ts: 0 };
+    lastWindowVelocitySignRef.current = null;
     try { localStorage.removeItem(STORAGE.activeSession); } catch (_) {}
   }, [serverUrl]);
 
@@ -1163,15 +1576,130 @@ function App() {
     };
     activeSessionRef.current = session;
     setActiveSessionMeta({ id: session.id, startedAtMs: Date.now(), samples: session.samples });
-    setFlowHistory([]); setFlowInstant(NaN); setFilteredDistance(NaN);
-    filteredSamplesRef.current = []; lastInstantUpdateRef.current = 0; sessionStartRef.current = null;
+    resetFlowMetrics("Coletando dados.");
     processedSampleTsRef.current = 0; persistActiveSession(true);
-  }, [persistActiveSession]);
+  }, [persistActiveSession, resetFlowMetrics]);
 
   const handleSessionToggle = useCallback(() => {
     if (activeSessionMeta) finalizeSession("manual_stop");
     else startNewSession();
   }, [activeSessionMeta, finalizeSession, startNewSession]);
+
+  const requestScan = useCallback(() => {
+    scanPausedRef.current = false;
+    setScanPaused(false);
+    bleRef.current.startScan?.();
+  }, []);
+
+  const pauseScan = useCallback(() => {
+    scanPausedRef.current = true;
+    setScanPaused(true);
+    bleRef.current.stopScan?.();
+  }, []);
+
+  const disconnectFromUi = useCallback(() => {
+    manualDisconnectRef.current = true;
+    scanPausedRef.current = false;
+    setScanPaused(false);
+    bleRef.current.disconnect?.();
+  }, []);
+
+  const restartSensorCommand = useCallback(() => {
+    restartReconnectNoPickerRef.current = true;
+    suppressNextDisconnectIssueRef.current = true;
+    scanPausedRef.current = false;
+    setScanPaused(false);
+    setConnectionIssue(null);
+    const ok = bleRef.current.sendCommand?.("0");
+    if (ok === false) {
+      restartReconnectNoPickerRef.current = false;
+      suppressNextDisconnectIssueRef.current = false;
+    } else {
+      setTimeout(() => {
+        if (bleRef.current.connected) {
+          try { bleRef.current.disconnect?.(); } catch (_) {}
+        }
+      }, 1200);
+    }
+    return ok;
+  }, []);
+
+  const schedulePendingRestartCommand = useCallback(() => {
+    if (!pendingRestartAfterReconnectRef.current) return;
+    const attempt = () => {
+      if (!pendingRestartAfterReconnectRef.current) return;
+      if (!bleRef.current.connected) return;
+      const ok = bleRef.current.sendCommand?.("0");
+      if (ok !== false) {
+        pendingRestartAfterReconnectRef.current = false;
+        pendingRestartAttemptsRef.current = 0;
+        restartReconnectNoPickerRef.current = true;
+        suppressNextDisconnectIssueRef.current = true;
+        setTimeout(() => {
+          if (bleRef.current.connected) {
+            try { bleRef.current.disconnect?.(); } catch (_) {}
+          }
+        }, 1200);
+        return;
+      }
+      pendingRestartAttemptsRef.current += 1;
+      if (pendingRestartAttemptsRef.current <= 5) setTimeout(attempt, 1000);
+      else {
+        pendingRestartAfterReconnectRef.current = false;
+        pendingRestartAttemptsRef.current = 0;
+        restartReconnectNoPickerRef.current = false;
+        if (!activeSessionRef.current && bleRef.current.connected) startNewSession();
+        setConnectionIssue({
+          type: "restart_failed",
+          title: "Não foi possível reiniciar",
+          message: "O app reconectou, mas não conseguiu enviar o comando de reinício. Você pode aguardar a próxima tentativa de conexão ou reiniciar o app.",
+        });
+      }
+    };
+    setTimeout(attempt, 1400);
+  }, [startNewSession]);
+
+  const handleIssueRestartDevice = useCallback(() => {
+    setConnectionIssue(null);
+    restartReconnectNoPickerRef.current = true;
+    scanPausedRef.current = false;
+    setScanPaused(false);
+    if (bleRef.current.connected) {
+      restartSensorCommand();
+      return;
+    }
+    pendingRestartAfterReconnectRef.current = true;
+    pendingRestartAttemptsRef.current = 0;
+    bleRef.current.startScan?.();
+  }, [restartSensorCommand]);
+
+  const waitForReconnect = useCallback(() => {
+    setConnectionIssue(null);
+    scanPausedRef.current = false;
+    setScanPaused(false);
+    if (!bleRef.current.connected && !bleRef.current.scanning) bleRef.current.startScan?.();
+  }, []);
+
+  const restartApp = useCallback(() => {
+    window.location.reload();
+  }, []);
+
+  const canContinueInterruptedSession = useCallback(() => {
+    if (!activeSessionRef.current) return false;
+    const last = lastValidVelocityRef.current || {};
+    const velocity = Number(last.value);
+    const ageMs = Date.now() - Number(last.ts || 0);
+    return Number.isFinite(velocity) &&
+      Math.abs(velocity) > SESSION_CONTINUE_MIN_VELOCITY_M_PER_MIN &&
+      ageMs <= 30000;
+  }, []);
+
+  const appBle = useMemo(() => ({
+    ...ble,
+    startScan: requestScan,
+    stopScan: pauseScan,
+    disconnect: disconnectFromUi,
+  }), [ble, requestScan, pauseScan, disconnectFromUi]);
 
   useEffect(() => {
     if (startupDoneRef.current) return; startupDoneRef.current = true;
@@ -1184,39 +1712,119 @@ function App() {
     syncFilterCatalog(serverUrl, setFilters);
   }, [serverUrl]);
 
+  useEffect(() => {
+    if (ble.connected || ble.scanning || scanPaused || ble.connectionStatus === "Connecting") return;
+    const id = setTimeout(() => {
+      if (!scanPausedRef.current && !bleRef.current.connected && !bleRef.current.scanning) {
+        bleRef.current.startScan?.();
+      }
+    }, 900);
+    return () => clearTimeout(id);
+  }, [ble.connected, ble.scanning, ble.connectionStatus, scanPaused]);
+
+  useEffect(() => {
+    if (manualDeviceChoice || ble.connected || ble.connectionStatus === "Connecting" || !autoConnectDevice) return;
+    const address = normalizeDeviceAddress(autoConnectDevice.address);
+    if (!address) return;
+    const now = Date.now();
+    if (autoConnectAttemptsRef.current[address] && now - autoConnectAttemptsRef.current[address] < 8000) return;
+    autoConnectAttemptsRef.current[address] = now;
+    ble.connect(autoConnectDevice.address);
+  }, [manualDeviceChoice, ble.connected, ble.connectionStatus, autoConnectDevice, ble.connect]);
+
   useEffect(() => { syncFilterCatalog(serverUrl, setFilters); }, [serverUrl]);
 
   useEffect(() => {
     const prevConnected = prevConnectedRef.current;
     const nowConnected = !!ble.connected;
     if (!prevConnected && nowConnected) {
-      const session = {
-        id: uid("session"), startedAt: nowIso(),
-        device: { name: ble.deviceName || "Dispositivo", address: ble.deviceAddress || "unknown" },
-        filter: selectedFilter ? { ...selectedFilter } : null,
-        samples: createSampleSeries(),
-      };
-      activeSessionRef.current = session;
-      setActiveSessionMeta({ id: session.id, startedAtMs: Date.now(), samples: session.samples });
-      setFlowHistory([]); setFlowInstant(NaN); setFilteredDistance(NaN);
-      filteredSamplesRef.current = []; lastInstantUpdateRef.current = 0;
-      sessionStartRef.current = null; processedSampleTsRef.current = 0;
-      setPendingFilterChoice(true); persistActiveSession(true);
+      setConnectionIssue(null);
+      const pendingRestartOnly = !!pendingRestartAfterReconnectRef.current;
+      const skipFilterChoice = !!restartReconnectNoPickerRef.current || pendingRestartOnly;
+      const resumeInterruptedSession = !!continueSessionAfterReconnectRef.current && !!activeSessionRef.current && !pendingRestartOnly;
+      if (resumeInterruptedSession) {
+        continueSessionAfterReconnectRef.current = false;
+        const session = activeSessionRef.current;
+        session.device = { name: ble.deviceName || session.device?.name || "Dispositivo", address: ble.deviceAddress || session.device?.address || "unknown" };
+        session.filter = selectedFilter ? { ...selectedFilter } : session.filter;
+        const startedAtMs = Number.isFinite(Date.parse(session.startedAt)) ? Date.parse(session.startedAt) : Date.now();
+        setActiveSessionMeta({ id: session.id, startedAtMs, samples: session.samples });
+        setPendingFilterChoice(false);
+        resetFlowMetrics("Coletando dados.");
+        persistActiveSession(true);
+      } else if (!pendingRestartOnly) {
+        continueSessionAfterReconnectRef.current = false;
+        const session = {
+          id: uid("session"), startedAt: nowIso(),
+          device: { name: ble.deviceName || "Dispositivo", address: ble.deviceAddress || "unknown" },
+          filter: selectedFilter ? { ...selectedFilter } : null,
+          samples: createSampleSeries(),
+        };
+        activeSessionRef.current = session;
+        setActiveSessionMeta({ id: session.id, startedAtMs: Date.now(), samples: session.samples });
+        resetFlowMetrics("Coletando dados.");
+        processedSampleTsRef.current = 0;
+        setPendingFilterChoice(!skipFilterChoice);
+        persistActiveSession(true);
+      } else {
+        setPendingFilterChoice(false);
+      }
       if (ble.deviceAddress) {
         setKnownDevices(cur => {
           const list = Array.isArray(cur) ? [...cur] : [];
-          const idx = list.findIndex(d => d.address === ble.deviceAddress);
-          const next = { address: ble.deviceAddress, name: ble.deviceName || "Dispositivo", lastSeenAt: nowIso() };
+          const address = normalizeDeviceAddress(ble.deviceAddress);
+          const idx = list.findIndex(d => normalizeDeviceAddress(d.address) === address);
+          const next = { address: address || ble.deviceAddress, name: ble.deviceName || "Dispositivo", lastSeenAt: nowIso() };
           if (idx >= 0) list[idx] = next; else list.push(next);
           return list.slice(-80);
         });
       }
+      if (pendingRestartOnly) schedulePendingRestartCommand();
+      else if (restartReconnectNoPickerRef.current) restartReconnectNoPickerRef.current = false;
     }
     if (prevConnected && !nowConnected) {
-      setPendingFilterChoice(false); finalizeSession("disconnect");
+      setPendingFilterChoice(false);
+      const manualDisconnect = !!manualDisconnectRef.current;
+      const suppressIssue = !!suppressNextDisconnectIssueRef.current;
+      manualDisconnectRef.current = false;
+      suppressNextDisconnectIssueRef.current = false;
+      const shouldContinueSession = !manualDisconnect && !suppressIssue && canContinueInterruptedSession();
+      if (shouldContinueSession) {
+        continueSessionAfterReconnectRef.current = true;
+        persistActiveSession(true);
+        setSyncState(s => ({ ...s, status: "idle", message: "Conexão perdida. Sessão mantida para continuar na reconexão." }));
+      } else {
+        continueSessionAfterReconnectRef.current = false;
+        finalizeSession(suppressIssue ? "restart_sensor" : "disconnect");
+      }
+      scanPausedRef.current = false;
+      setScanPaused(false);
+      if (!manualDisconnect && !suppressIssue) {
+        setConnectionIssue({
+          type: "connection_lost",
+          title: "Conexão perdida",
+          message: shouldContinueSession
+            ? "A conexão com o sensor foi perdida. Como a velocidade estava acima de 0,1 m/min, a sessão será continuada se o sensor reconectar."
+            : "A conexão com o sensor foi perdida. Como não havia velocidade suficiente, a sessão atual foi salva quando havia amostras e a próxima conexão inicia uma nova sessão.",
+        });
+      }
     }
     prevConnectedRef.current = nowConnected;
-  }, [ble.connected, ble.deviceAddress, ble.deviceName, selectedFilter, finalizeSession, persistActiveSession]);
+  }, [ble.connected, ble.deviceAddress, ble.deviceName, selectedFilter, finalizeSession, persistActiveSession, resetFlowMetrics, schedulePendingRestartCommand, canContinueInterruptedSession]);
+
+  useEffect(() => {
+    const message = String(ble.errorMsg || "");
+    if (!message) return;
+    if (/bluetooth desligado|ative o bluetooth|scanner ble indispon/i.test(message)) {
+      setConnectionIssue({
+        type: "bluetooth_off",
+        title: "Bluetooth indisponível",
+        message: "O Bluetooth parou ou está desligado. Ative o Bluetooth para que o app continue procurando e reconecte ao sensor.",
+      });
+      scanPausedRef.current = false;
+      setScanPaused(false);
+    }
+  }, [ble.errorMsg]);
 
   useEffect(() => {
     if (activeSessionRef.current) {
@@ -1247,19 +1855,85 @@ function App() {
       const now = Date.now();
       const raw = currentBle.distanceSamples || [];
       const recent = raw.filter(s => s.ts >= now - 2000);
+      const filterDef = selectedFilterRef.current;
+      const areaM2 = filterDef ? Number(filterDef.areaM2) : NaN;
+      if (!flowWindowStartMsRef.current) flowWindowStartMsRef.current = now;
+      const unavailable = (reason) => {
+        const remaining = Math.max(0, Math.ceil((10000 - (now - flowWindowStartMsRef.current)) / 1000));
+        setFlowVelocity(NaN);
+        setFlowInstant(NaN);
+        setFlowWaitSeconds(remaining);
+        setFlowReason(remaining > 0 ? "Coletando dados." : reason);
+        if (remaining <= 0) lastValidVelocityRef.current = { value: NaN, ts: now };
+      };
+      const rawMotion = computeRawWaterMotion(raw, 10000, now);
+      const rawVelocityMpm = Number.isFinite(rawMotion.velocityMPerMin) ? rawMotion.velocityMPerMin : NaN;
+      const rawFlow10 = computeFlowFromVelocityLpm(areaM2, rawVelocityMpm);
+      const rawDebug = {
+        rawMotionCm: Number.isFinite(rawMotion.motionCm) ? round(rawMotion.motionCm, 4) : NaN,
+        rawVelocityMpm: Number.isFinite(rawVelocityMpm) ? round(rawVelocityMpm, 6) : NaN,
+        rawFlow10: Number.isFinite(rawFlow10) ? round(rawFlow10, 4) : NaN,
+      };
       const filtered = robustFilterDistance(recent);
-      if (!Number.isFinite(filtered)) return;
+      if (!Number.isFinite(filtered)) {
+        const reason = recent.length ? "Sem distancia valida apos filtro robusto." : "Sem amostras recentes do sensor.";
+        unavailable(reason);
+        setDebugInfo(prev => ({
+          ...prev,
+          ...rawDebug,
+          filteredDistance: NaN,
+          recentCount: recent.length,
+          rawCount: raw.length,
+          bufferCount: filteredSamplesRef.current.length,
+          reason,
+          lastProcessedAt: now,
+        }));
+        return;
+      }
       const filteredSample = { ts: now, distance: filtered };
       const buf = filteredSamplesRef.current;
       buf.push(filteredSample);
       if (buf.length > 600) buf.splice(0, buf.length - 600);
       if (!sessionStartRef.current) sessionStartRef.current = filteredSample;
-      const filterDef = selectedFilterRef.current;
-      const areaM2 = filterDef ? Number(filterDef.areaM2) : NaN;
-      const flow10 = computeFlowLpm(buf, areaM2, 10000, now);
-      setFilteredDistance(filtered);
-      if (now - lastInstantUpdateRef.current >= 10000) { setFlowInstant(flow10); lastInstantUpdateRef.current = now; }
-      setFlowHistory(prev => [...prev.slice(-MAX_HISTORY_POINTS + 1), { ts: now, distanceCm: round(filtered, 3), flow10 }]);
+      const motion = computeWaterMotion(buf, 10000, now);
+      const velocityMpm = Number.isFinite(motion.velocityMPerMin) ? motion.velocityMPerMin : NaN;
+      const flow10 = computeFlowFromVelocityLpm(areaM2, velocityMpm);
+      const motionReason = motion.reason || (Number.isFinite(velocityMpm) ? "Janela de 10s valida." : "Aguardando janela de 10s.");
+      if (!Number.isFinite(velocityMpm)) {
+        unavailable(motionReason);
+      } else if (now - lastInstantUpdateRef.current >= 10000) {
+        const currentVelocitySign = Math.sign(velocityMpm);
+        let flowInverted = false;
+        if (lastWindowVelocitySignRef.current !== null && lastWindowVelocitySignRef.current !== 0 && currentVelocitySign !== 0) {
+          flowInverted = lastWindowVelocitySignRef.current !== currentVelocitySign;
+        }
+        if (flowInverted) {
+          setFlowHistory([{ ts: now, velocityMpm: round(velocityMpm, 4), flow10 }]);
+          setFlowWaitSeconds(10);
+          flowWindowStartMsRef.current = now;
+        } else {
+          setFlowHistory(prev => [...prev, { ts: now, velocityMpm: round(velocityMpm, 4), flow10 }]);
+          setFlowWaitSeconds(0);
+        }
+        lastWindowVelocitySignRef.current = currentVelocitySign;
+        setFlowVelocity(velocityMpm);
+        setFlowInstant(flow10);
+        setFlowReason(motionReason);
+        lastValidVelocityRef.current = { value: velocityMpm, ts: now };
+        lastInstantUpdateRef.current = now;
+      }
+      setDebugInfo({
+        ...rawDebug,
+        filteredDistance: round(filtered, 3),
+        recentCount: recent.length,
+        rawCount: raw.length,
+        bufferCount: buf.length,
+        motionCm: Number.isFinite(motion.motionCm) ? round(motion.motionCm, 4) : NaN,
+        velocityMpm: Number.isFinite(velocityMpm) ? round(velocityMpm, 6) : NaN,
+        flow10: Number.isFinite(flow10) ? round(flow10, 4) : NaN,
+        reason: motionReason,
+        lastProcessedAt: now,
+      });
     };
     const id = setInterval(tick, 1000); return () => clearInterval(id);
   }, []);
@@ -1274,7 +1948,23 @@ function App() {
   const tabTitle = { monitor: "Monitor", sessions: "Sessões", filters: "Filtros", settings: "Ajustes" };
 
   if (!ble.connected) {
-    return <ConnectScreen ble={ble} />;
+    return (
+      <>
+        <ConnectScreen
+          ble={appBle}
+          autoConnectDevice={autoConnectDevice}
+          isPreferredDevice={d => isKnownDevice(d, knownDeviceMap)}
+          scanPaused={scanPaused}
+          manualDeviceChoice={manualDeviceChoice}
+        />
+        <ConnectionIssueDialog
+          issue={connectionIssue}
+          onRestartDevice={handleIssueRestartDevice}
+          onWait={waitForReconnect}
+          onRestartApp={restartApp}
+        />
+      </>
+    );
   }
 
   return (
@@ -1286,25 +1976,43 @@ function App() {
       <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {tab === "monitor" && (
           <MonitorTab
-            ble={ble} filter={selectedFilter}
-            filteredDistance={filteredDistance} flowInstant={flowInstant}
-            flowHistory={flowHistory} activeSessionMeta={activeSessionMeta}
+            ble={appBle} filter={selectedFilter}
+            flowVelocity={flowVelocity} flowInstant={flowInstant}
+            flowHistory={flowHistory} flowReason={flowReason}
+            flowWaitSeconds={flowWaitSeconds}
+            activeSessionMeta={activeSessionMeta}
             onPickFilter={() => setPicking(true)}
             onStartSession={handleSessionToggle}
           />
         )}
         {tab === "sessions" && <SessionsTab syncState={syncState} onSync={handleSync} />}
-        {tab === "filters" && <FiltersTab filters={filters} onPick={f => { setSelectedFilterId(f.id); setTab("monitor"); }} />}
-        {tab === "settings" && <SettingsTab serverUrl={serverUrl} setServerUrl={setServerUrl} />}
-        {(picking || (ble.connected && pendingFilterChoice && !selectedFilter)) && (
+        {tab === "filters" && <FiltersTab filters={filters} onPick={f => { setSelectedFilterId(f.id); setPendingFilterChoice(false); setTab("monitor"); }} />}
+        {tab === "settings" && (
+          <SettingsTab
+            serverUrl={serverUrl} setServerUrl={setServerUrl} ble={appBle}
+            activeSessionMeta={activeSessionMeta}
+            onEndSession={(reason, forceSave) => finalizeSession(reason, forceSave)}
+            onRestartSensor={restartSensorCommand}
+            debugMode={debugMode}
+            setDebugMode={setDebugMode}
+            debugInfo={debugInfo}
+          />
+        )}
+        {(picking || (tab === "monitor" && ble.connected && pendingFilterChoice)) && (
           <FilterPickerOverlay
-            filters={filters}
+            filters={filters} suggestedFilter={selectedFilter}
             onPick={f => { setSelectedFilterId(f.id); setPendingFilterChoice(false); }}
             onClose={() => { setPicking(false); setPendingFilterChoice(false); }}
           />
         )}
       </div>
-      <BottomTabs tab={tab} onChange={setTab} />
+      <BottomTabs tab={tab} onChange={setTab} onOpenData={appBle.openBiDashboard} />
+      <ConnectionIssueDialog
+        issue={connectionIssue}
+        onRestartDevice={handleIssueRestartDevice}
+        onWait={waitForReconnect}
+        onRestartApp={restartApp}
+      />
     </div>
   );
 }

@@ -307,9 +307,20 @@ class BLEManager private constructor(private val context: Context) {
     fun isBluetoothEnabled(): Boolean = bluetoothAdapter?.isEnabled == true
 
     @SuppressLint("MissingPermission")
+    fun handleBluetoothUnavailable(reason: String = "Bluetooth desligado") {
+        stopScan()
+        closeGatt()
+        handler.post {
+            bleListener?.onScanStateChanged(false)
+            bleListener?.onConnectionStateChanged("Disconnected", null, null)
+            bleListener?.onError(reason)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     fun startScan() {
         if (!isBluetoothEnabled()) {
-            handler.post { bleListener?.onError("Bluetooth desligado") }
+            handleBluetoothUnavailable("Bluetooth desligado")
             return
         }
         if (isScanning) stopScan()
@@ -339,6 +350,10 @@ class BLEManager private constructor(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) {
+        if (!isBluetoothEnabled()) {
+            handleBluetoothUnavailable("Bluetooth desligado")
+            return
+        }
         stopScan()
         closeGatt()
         bluetoothGatt = device.connectGatt(context, false, gattCallback)
@@ -357,7 +372,28 @@ class BLEManager private constructor(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
-        bluetoothGatt?.disconnect()
+        if (!isBluetoothEnabled()) {
+            handleBluetoothUnavailable("Bluetooth desligado")
+            return
+        }
+        val gatt = bluetoothGatt
+        if (gatt == null) {
+            handler.post { bleListener?.onConnectionStateChanged("Disconnected", null, null) }
+            return
+        }
+        try {
+            gatt.disconnect()
+        } catch (_: Throwable) {
+            closeGatt()
+            handler.post { bleListener?.onConnectionStateChanged("Disconnected", null, null) }
+            return
+        }
+        handler.postDelayed({
+            if (bluetoothGatt === gatt) {
+                closeGatt()
+                bleListener?.onConnectionStateChanged("Disconnected", null, null)
+            }
+        }, 1500L)
     }
 
     fun sendCommand(command: String): Boolean {

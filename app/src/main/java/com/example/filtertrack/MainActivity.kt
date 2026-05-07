@@ -5,7 +5,10 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -30,10 +33,26 @@ class MainActivity : AppCompatActivity(),
 
     private lateinit var webView: WebView
     private lateinit var bleManager: BLEManager
+    private lateinit var biButton: View
 
     @Volatile private var pageReady = false
     private val pendingJs = ArrayDeque<String>()
     private var pendingScanAfterBluetoothEnable = false
+    private var bluetoothReceiverRegistered = false
+
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_TURNING_OFF,
+                BluetoothAdapter.STATE_OFF -> {
+                    pendingScanAfterBluetoothEnable = false
+                    setBiButtonVisible(true)
+                    bleManager.handleBluetoothUnavailable("Bluetooth desligado")
+                }
+            }
+        }
+    }
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -71,10 +90,10 @@ class MainActivity : AppCompatActivity(),
         bleManager.dataListener = this
 
         webView = findViewById(R.id.webView)
-        findViewById<View>(R.id.biButton).setOnClickListener {
-            startActivity(Intent(this, BiDashboardActivity::class.java))
-        }
+        biButton = findViewById(R.id.biButton)
+        biButton.setOnClickListener { openBiDashboard() }
         setupWebView()
+        registerBluetoothStateReceiver()
         showStartupErrorIfAny(intent)
     }
 
@@ -86,6 +105,7 @@ class MainActivity : AppCompatActivity(),
             bleManager.disconnect()
             pageReady = false
             pendingJs.clear()
+            setBiButtonVisible(true)
             webView.loadUrl("file:///android_asset/index.html")
             intent.removeExtra("reset_to_initial_screen")
         }
@@ -126,16 +146,39 @@ class MainActivity : AppCompatActivity(),
         webView.loadUrl("file:///android_asset/index.html")
     }
 
+    private fun registerBluetoothStateReceiver() {
+        if (bluetoothReceiverRegistered) return
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(bluetoothStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(bluetoothStateReceiver, filter)
+        }
+        bluetoothReceiverRegistered = true
+    }
+
     private fun handleAction(action: WebAppInterface.Action) {
         when (action) {
             WebAppInterface.Action.StartScan -> checkPermissionsAndScan()
             WebAppInterface.Action.StopScan -> bleManager.stopScan()
             is WebAppInterface.Action.Connect -> bleManager.connect(action.address)
             WebAppInterface.Action.Disconnect -> bleManager.disconnect()
+            WebAppInterface.Action.OpenBiDashboard -> openBiDashboard()
             is WebAppInterface.Action.SendCommand -> {
                 val ok = bleManager.sendCommand(action.cmd)
                 if (!ok) push("onError", "Falha ao enviar comando")
             }
+        }
+    }
+
+    private fun openBiDashboard() {
+        startActivity(Intent(this, BiDashboardActivity::class.java))
+    }
+
+    private fun setBiButtonVisible(visible: Boolean) {
+        if (::biButton.isInitialized) {
+            biButton.visibility = if (visible) View.VISIBLE else View.GONE
         }
     }
 
@@ -217,6 +260,7 @@ class MainActivity : AppCompatActivity(),
     }
 
     override fun onConnectionStateChanged(status: String, deviceName: String?, deviceAddress: String?) {
+        setBiButtonVisible(status != "Connected")
         push("onConnectionStateChanged", status, deviceName, deviceAddress)
     }
 
@@ -238,6 +282,10 @@ class MainActivity : AppCompatActivity(),
 
     override fun onDestroy() {
         super.onDestroy()
+        if (bluetoothReceiverRegistered) {
+            try { unregisterReceiver(bluetoothStateReceiver) } catch (_: Throwable) {}
+            bluetoothReceiverRegistered = false
+        }
         if (bleManager.bleListener === this) bleManager.bleListener = null
         if (bleManager.dataListener === this) bleManager.dataListener = null
         try {

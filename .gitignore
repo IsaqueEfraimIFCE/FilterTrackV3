@@ -1,5 +1,6 @@
 *.iml
 .gradle
+.kotlin/
 .gradle-user/
 /local.properties
 /.idea/caches
@@ -14,8 +15,6 @@
 .externalNativeBuild
 .cxx
 local.properties
-backend/data/*.ndjson
-backend/.env
 backend-fastapi/.env
 backend-fastapi/.venv/
 backend-fastapi/__pycache__/

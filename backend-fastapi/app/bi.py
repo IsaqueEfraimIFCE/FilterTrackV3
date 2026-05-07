@@ -25,6 +25,7 @@ router = APIRouter()
 BI_HTML_PATH = Path(__file__).with_name("static") / "bi.html"
 DEFAULT_FILTERS_PATH = Path(__file__).with_name("data") / "default_filters.json"
 FLOW_EPSILON_LPM = 0.05
+SAMPLE_FORMAT = "distance_cm_x100_v1"
 
 _DEFAULT_FILTERS_CACHE: list[dict[str, Any]] | None = None
 
@@ -213,6 +214,84 @@ def _sample_endpoints(samples: Any) -> tuple[tuple[int, float], tuple[int, float
     if first is None or last is None or first == last:
         return None
     return first, last
+
+
+def _sample_points(samples: Any) -> tuple[list[tuple[int, int]], float]:
+    points: list[tuple[int, int]] = []
+    scale = 100.0
+
+    if isinstance(samples, dict):
+        t0 = _finite_float(samples.get("t0"))
+        offsets = samples.get("t")
+        distances = samples.get("d")
+        scale = _finite_float(samples.get("scale")) or 100.0
+        if t0 is None or scale <= 0 or not isinstance(offsets, list) or not isinstance(distances, list):
+            return [], scale
+        for raw_offset, raw_distance in zip(offsets, distances, strict=False):
+            offset = _finite_float(raw_offset)
+            distance = _finite_float(raw_distance)
+            if offset is None or distance is None:
+                continue
+            points.append((int(round(t0 + offset)), int(round(distance))))
+
+    elif isinstance(samples, list):
+        for sample in samples:
+            if not isinstance(sample, dict):
+                continue
+            ts_ms = _sample_timestamp_ms(sample)
+            distance = _finite_float(sample.get("distanceCm"))
+            if distance is None:
+                distance = _finite_float(sample.get("distance"))
+            if ts_ms is None or distance is None:
+                continue
+            points.append((ts_ms, int(round(distance * scale))))
+
+    points.sort(key=lambda item: item[0])
+    return points, scale
+
+
+def _compact_from_points(points: list[tuple[int, int]], scale: float) -> dict[str, Any]:
+    if not points:
+        return {
+            "format": SAMPLE_FORMAT,
+            "t0": None,
+            "dtUnit": "ms",
+            "distanceUnit": "cm",
+            "scale": int(scale) if float(scale).is_integer() else scale,
+            "t": [],
+            "d": [],
+        }
+    t0 = points[0][0]
+    return {
+        "format": SAMPLE_FORMAT,
+        "t0": t0,
+        "dtUnit": "ms",
+        "distanceUnit": "cm",
+        "scale": int(scale) if float(scale).is_integer() else scale,
+        "t": [max(0, ts - t0) for ts, _ in points],
+        "d": [distance for _, distance in points],
+    }
+
+
+def _point_bounds(points: list[tuple[int, int]]) -> tuple[datetime | None, datetime | None]:
+    if not points:
+        return None, None
+    return (
+        datetime.fromtimestamp(points[0][0] / 1000, UTC),
+        datetime.fromtimestamp(points[-1][0] / 1000, UTC),
+    )
+
+
+def _clean_time_slice(raw: Any) -> dict[str, str] | None:
+    if not isinstance(raw, dict):
+        return None
+    start = parse_iso_or_none(raw.get("from") or raw.get("start"))
+    end = parse_iso_or_none(raw.get("to") or raw.get("end"))
+    if start is None and end is None:
+        return None
+    if start is None or end is None or end <= start:
+        raise HTTPException(status_code=400, detail="Recorte de tempo invalido.")
+    return {"from": to_iso_z(start) or "", "to": to_iso_z(end) or ""}
 
 
 def _flow_direction(flow_lpm: float | None) -> str:
@@ -413,17 +492,66 @@ def _clean_filter(raw: Any, generate_id: bool = False) -> dict[str, Any]:
     if not filter_id and generate_id:
         filter_id = f"custom-{uuid4().hex[:12]}"
 
+    name = safe_text(raw.get("name"), 200)
+    number = safe_text(raw.get("number"), 40)
+    if not name and number:
+        name = f"Filtro {number}"
+
     cleaned = {
         "id": filter_id,
-        "name": safe_text(raw.get("name"), 200),
+        "name": name,
         "areaM2": area_m2,
         "station": safe_text(raw.get("station"), 200),
         "location": safe_text(raw.get("location"), 200),
         "businessUnit": safe_text(raw.get("businessUnit"), 200),
     }
+    if number:
+        cleaned["number"] = number
     if "custom" in raw or generate_id:
         cleaned["custom"] = bool(raw.get("custom", True))
     return cleaned
+
+
+def _registered_filter_payload(db: Session, filter_id: str) -> dict[str, Any] | None:
+    filter_id = safe_text(filter_id, 160)
+    if not filter_id:
+        return None
+
+    approved = db.get(ApprovedFilter, filter_id)
+    if approved is not None:
+        return {
+            "id": approved.filter_id,
+            "name": approved.name,
+            "areaM2": approved.area_m2,
+            "station": approved.station,
+            "location": approved.location,
+            "businessUnit": approved.business_unit,
+        }
+
+    for item in _load_default_filters():
+        if item.get("id") == filter_id:
+            return {
+                "id": item.get("id") or "",
+                "name": item.get("name") or "",
+                "areaM2": item.get("areaM2"),
+                "station": item.get("station") or "",
+                "location": item.get("location") or "",
+                "businessUnit": item.get("businessUnit") or "",
+            }
+
+    record = db.execute(
+        select(SessionRecord).where(SessionRecord.filter_id == filter_id).limit(1)
+    ).scalar_one_or_none()
+    if record is None:
+        return None
+    return {
+        "id": record.filter_id,
+        "name": record.filter_name,
+        "areaM2": record.filter_area_m2,
+        "station": record.filter_station,
+        "location": record.filter_location,
+        "businessUnit": record.filter_business_unit,
+    }
 
 
 def _clean_device(raw: Any) -> dict[str, str]:
@@ -474,6 +602,14 @@ def _apply_session_edit(db: Session, proposal: ChangeProposal) -> None:
         record.device_name = device["name"]
         record.device_address = device["address"]
 
+    if "filter" in changes and changes.get("timeSlice"):
+        filter_data = _clean_filter(changes.get("filter"))
+        time_slice = _clean_time_slice(changes.get("timeSlice"))
+        if time_slice is None:
+            raise HTTPException(status_code=400, detail="Recorte de tempo invalido.")
+        _apply_session_time_slice(db, record, filter_data, time_slice)
+        return
+
     if "filter" in changes:
         filter_data = _clean_filter(changes.get("filter"))
         session["filter"] = filter_data
@@ -487,6 +623,110 @@ def _apply_session_edit(db: Session, proposal: ChangeProposal) -> None:
     payload = dict(record.payload) if isinstance(record.payload, dict) else {}
     payload["session"] = session
     record.payload = payload
+    flag_modified(record, "payload")
+
+
+def _apply_session_time_slice(
+    db: Session,
+    record: SessionRecord,
+    filter_data: dict[str, Any],
+    time_slice: dict[str, str],
+) -> None:
+    start = parse_iso_or_none(time_slice.get("from"))
+    end = parse_iso_or_none(time_slice.get("to"))
+    if start is None or end is None or end <= start:
+        raise HTTPException(status_code=400, detail="Recorte de tempo invalido.")
+
+    start_ms = int(round(start.timestamp() * 1000))
+    end_ms = int(round(end.timestamp() * 1000))
+    payload = dict(record.payload) if isinstance(record.payload, dict) else {}
+    session = dict(_payload_session(record))
+    points, scale = _sample_points(session.get("samples"))
+    selected = [point for point in points if start_ms <= point[0] <= end_ms]
+    remaining = [point for point in points if point[0] < start_ms or point[0] > end_ms]
+
+    if not selected:
+        raise HTTPException(status_code=400, detail="Recorte sem amostras.")
+
+    if not remaining:
+        session["filter"] = filter_data
+        session["samples"] = _compact_from_points(selected, scale)
+        selected_start, selected_end = _point_bounds(selected)
+        session["startedAt"] = to_iso_z(selected_start)
+        session["endedAt"] = to_iso_z(selected_end)
+        payload["session"] = session
+        record.payload = payload
+        record.started_at = selected_start
+        record.ended_at = selected_end
+        record.sample_count = len(selected)
+        record.filter_id = filter_data["id"]
+        record.filter_name = filter_data["name"]
+        record.filter_area_m2 = filter_data["areaM2"]
+        record.filter_station = filter_data["station"]
+        record.filter_location = filter_data["location"]
+        record.filter_business_unit = filter_data["businessUnit"]
+        flag_modified(record, "payload")
+        return
+
+    token = uuid4().hex[:10]
+    original_session_id = safe_text(session.get("id") or record.session_id, 170)
+    selected_start, selected_end = _point_bounds(selected)
+    remaining_start, remaining_end = _point_bounds(remaining)
+
+    base_ingestion_id = safe_text(record.ingestion_id, 44) or "session"
+    ingestion_id = f"{base_ingestion_id}-slice-{token}"
+    while db.get(SessionRecord, ingestion_id) is not None:
+        token = uuid4().hex[:10]
+        ingestion_id = f"{base_ingestion_id}-slice-{token}"
+
+    slice_session_id = f"{original_session_id}-slice-{token}"
+    slice_session = dict(session)
+    slice_session["id"] = slice_session_id
+    slice_session["startedAt"] = to_iso_z(selected_start)
+    slice_session["endedAt"] = to_iso_z(selected_end)
+    slice_session["endReason"] = "bi_time_slice"
+    slice_session["filter"] = filter_data
+    slice_session["samples"] = _compact_from_points(selected, scale)
+    slice_session["splitFromSessionId"] = record.session_id
+    slice_session["timeSlice"] = time_slice
+
+    slice_payload = dict(payload)
+    slice_payload["session"] = slice_session
+
+    dedup_key = f"{safe_text(record.dedup_key, 490)}|slice|{token}"
+    new_record = SessionRecord(
+        ingestion_id=ingestion_id,
+        dedup_key=dedup_key,
+        schema_version=record.schema_version,
+        app=record.app,
+        uploaded_at=record.uploaded_at,
+        received_at=now_utc(),
+        session_id=slice_session_id,
+        started_at=selected_start,
+        ended_at=selected_end,
+        end_reason="bi_time_slice",
+        sample_count=len(selected),
+        device_name=record.device_name,
+        device_address=record.device_address,
+        filter_id=filter_data["id"],
+        filter_name=filter_data["name"],
+        filter_area_m2=filter_data["areaM2"],
+        filter_station=filter_data["station"],
+        filter_location=filter_data["location"],
+        filter_business_unit=filter_data["businessUnit"],
+        payload=slice_payload,
+    )
+    db.add(new_record)
+
+    session["samples"] = _compact_from_points(remaining, scale)
+    session["startedAt"] = to_iso_z(remaining_start)
+    session["endedAt"] = to_iso_z(remaining_end)
+    session["timeSliceRemoved"] = time_slice
+    payload["session"] = session
+    record.payload = payload
+    record.started_at = remaining_start
+    record.ended_at = remaining_end
+    record.sample_count = len(remaining)
     flag_modified(record, "payload")
 
 
@@ -517,7 +757,25 @@ def _apply_filter_edit(db: Session, proposal: ChangeProposal) -> None:
     target_id = (proposal.target_session_ref or "").strip()
     record = db.get(ApprovedFilter, target_id) if target_id else None
     if record is None:
-        raise HTTPException(status_code=404, detail="Filtro nao encontrado.")
+        base = _registered_filter_payload(db, target_id)
+        if base is None:
+            raise HTTPException(status_code=404, detail="Filtro nao encontrado.")
+        cleaned_base = _clean_filter(base)
+        record = ApprovedFilter(
+            filter_id=cleaned_base["id"],
+            name=cleaned_base["name"],
+            area_m2=cleaned_base["areaM2"],
+            station=cleaned_base["station"],
+            location=cleaned_base["location"],
+            business_unit=cleaned_base["businessUnit"],
+            payload=cleaned_base,
+            source="proposal",
+            archived=False,
+            source_proposal_id=proposal.proposal_id,
+            approved_at=now_utc(),
+            updated_at=now_utc(),
+        )
+        db.add(record)
 
     payload = proposal.payload if isinstance(proposal.payload, dict) else {}
     changes = payload.get("changes") if isinstance(payload.get("changes"), dict) else {}
@@ -573,7 +831,25 @@ def _apply_filter_archive(db: Session, proposal: ChangeProposal) -> None:
     target_id = (proposal.target_session_ref or "").strip()
     record = db.get(ApprovedFilter, target_id) if target_id else None
     if record is None:
-        raise HTTPException(status_code=404, detail="Filtro nao encontrado.")
+        base = _registered_filter_payload(db, target_id)
+        if base is None:
+            raise HTTPException(status_code=404, detail="Filtro nao encontrado.")
+        cleaned_base = _clean_filter(base)
+        record = ApprovedFilter(
+            filter_id=cleaned_base["id"],
+            name=cleaned_base["name"],
+            area_m2=cleaned_base["areaM2"],
+            station=cleaned_base["station"],
+            location=cleaned_base["location"],
+            business_unit=cleaned_base["businessUnit"],
+            payload=cleaned_base,
+            source="proposal",
+            archived=False,
+            source_proposal_id=proposal.proposal_id,
+            approved_at=now_utc(),
+            updated_at=now_utc(),
+        )
+        db.add(record)
     payload = proposal.payload if isinstance(proposal.payload, dict) else {}
     record.archived = bool(payload.get("archived", True))
     record.updated_at = now_utc()
@@ -925,18 +1201,25 @@ def create_proposal(
     if proposal_type in {"filter_edit", "filter_archive"} and not target_session_ref:
         raise HTTPException(status_code=400, detail="Filtro alvo obrigatorio.")
     if proposal_type == "custom_filter":
-        payload = {"filter": _clean_filter(payload.get("filter") or payload, generate_id=True)}
+        raw_filter = payload.get("filter") if isinstance(payload.get("filter"), dict) else payload
+        payload = {"filter": _clean_filter(raw_filter, generate_id=True)}
     if proposal_type == "session_edit":
         cleaned: dict[str, Any] = {}
         if "device" in payload:
             cleaned["device"] = _clean_device(payload.get("device"))
         if "filter" in payload:
             cleaned["filter"] = _clean_filter(payload.get("filter"))
+        if "timeSlice" in payload:
+            time_slice = _clean_time_slice(payload.get("timeSlice"))
+            if time_slice is not None:
+                cleaned["timeSlice"] = time_slice
+        if "timeSlice" in cleaned and "filter" not in cleaned:
+            raise HTTPException(status_code=400, detail="Recorte de tempo exige filtro alvo.")
         payload = cleaned
         if not payload:
             raise HTTPException(status_code=400, detail="Nenhuma alteracao enviada.")
     if proposal_type == "filter_edit":
-        target = db.get(ApprovedFilter, target_session_ref)
+        target = _registered_filter_payload(db, target_session_ref)
         if target is None:
             raise HTTPException(status_code=404, detail="Filtro nao encontrado.")
         raw_changes = payload.get("changes") if isinstance(payload.get("changes"), dict) else payload
@@ -959,7 +1242,7 @@ def create_proposal(
             "retroactive": bool(payload.get("retroactive", True)),
         }
     if proposal_type == "filter_archive":
-        target = db.get(ApprovedFilter, target_session_ref)
+        target = _registered_filter_payload(db, target_session_ref)
         if target is None:
             raise HTTPException(status_code=404, detail="Filtro nao encontrado.")
         payload = {"archived": bool(payload.get("archived", True))}
