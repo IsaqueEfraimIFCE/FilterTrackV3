@@ -65,6 +65,8 @@ const MIN_VALID_DISTANCE_CM = 25;
 const MIN_MOTION_CM_PER_10S = 0.1;
 const MAX_REASONABLE_VELOCITY_M_PER_MIN = 10;
 const SESSION_CONTINUE_MIN_VELOCITY_M_PER_MIN = 0.1;
+const DEG_PER_RAD = 180 / Math.PI;
+const RAD_PER_DEG = Math.PI / 180;
 const CLOUD_SERVER_URL = "https://filtertrack-api.fly.dev/filtertrack/sessions";
 const LEGACY_LOCAL_SERVER_URL = "http://10.0.2.2:8080/filtertrack/sessions";
 const DEFAULT_SERVER_URL = CLOUD_SERVER_URL;
@@ -275,20 +277,123 @@ function pickDistanceFromObject(obj) {
   }
   return NaN;
 }
+function parseVector3(value) {
+  if (Array.isArray(value) && value.length >= 3) {
+    const x = parseNumeric(value[0]), y = parseNumeric(value[1]), z = parseNumeric(value[2]);
+    return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z) ? { x, y, z } : null;
+  }
+  if (value && typeof value === "object") {
+    const x = parseNumeric(value.x ?? value.X), y = parseNumeric(value.y ?? value.Y), z = parseNumeric(value.z ?? value.Z);
+    return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z) ? { x, y, z } : null;
+  }
+  if (typeof value !== "string") return null;
+  const parts = value.split(",").map(v => parseNumeric(v.trim()));
+  return parts.length >= 3 && parts.slice(0, 3).every(Number.isFinite) ? { x: parts[0], y: parts[1], z: parts[2] } : null;
+}
+function pickVectorFromObject(obj, keys) {
+  if (!obj || typeof obj !== "object") return null;
+  for (const k of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      const v = parseVector3(obj[k]);
+      if (v) return v;
+    }
+  }
+  for (const val of Object.values(obj)) {
+    if (val && typeof val === "object") {
+      const v = pickVectorFromObject(val, keys);
+      if (v) return v;
+    }
+  }
+  return null;
+}
+function pickVectorFromText(text, keys) {
+  for (const key of keys) {
+    const re = new RegExp(`${key}\\s*[:=]\\s*(-?\\d+(?:[.,]\\d+)?)\\s*,\\s*(-?\\d+(?:[.,]\\d+)?)\\s*,\\s*(-?\\d+(?:[.,]\\d+)?)`, "i");
+    const m = String(text || "").match(re);
+    if (m) {
+      const x = parseNumeric(m[1]), y = parseNumeric(m[2]), z = parseNumeric(m[3]);
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return { x, y, z };
+    }
+  }
+  return null;
+}
+function normalizeVec3(v) {
+  if (!v) return null;
+  const norm = Math.sqrt((v.x * v.x) + (v.y * v.y) + (v.z * v.z));
+  return norm > 0.000001 ? { x: v.x / norm, y: v.y / norm, z: v.z / norm } : null;
+}
+function calculateAngleFromGroundDeg(accelRaw) {
+  const gravity = normalizeVec3(accelRaw);
+  if (!gravity) return NaN;
+  const dot = clamp(gravity.z, -1, 1);
+  const angleFromVertical = Math.acos(Math.abs(dot)) * DEG_PER_RAD;
+  return 90 - angleFromVertical;
+}
+function calculateTiltCompensatedHeadingDeg(accelRaw, magRaw) {
+  const a = normalizeVec3(accelRaw), m = normalizeVec3(magRaw);
+  if (!a || !m) return NaN;
+  const roll = Math.atan2(a.y, a.z);
+  const pitch = Math.atan2(-a.x, Math.sqrt((a.y * a.y) + (a.z * a.z)));
+  const magXComp = (m.x * Math.cos(pitch)) + (m.z * Math.sin(pitch));
+  const magYComp = (m.x * Math.sin(roll) * Math.sin(pitch)) +
+    (m.y * Math.cos(roll)) - (m.z * Math.sin(roll) * Math.cos(pitch));
+  let heading = Math.atan2(-magYComp, magXComp) * DEG_PER_RAD;
+  if (heading < 0) heading += 360;
+  return heading;
+}
+function correctDistanceForSensorAngle(distanceCm, angleFromGroundDeg) {
+  if (!Number.isFinite(distanceCm) || !Number.isFinite(angleFromGroundDeg)) return distanceCm;
+  const factor = Math.sin(clamp(angleFromGroundDeg, 0, 90) * RAD_PER_DEG);
+  return Number.isFinite(factor) ? distanceCm * factor : distanceCm;
+}
+function buildParsedPayload(distanceCm, error, fields = {}) {
+  const accelRaw = fields.accelRaw || null;
+  const magRaw = fields.magRaw || null;
+  const providedAngle = parseNumeric(fields.angleFromGroundDeg ?? fields.angleDeg);
+  const angleFromGroundDeg = Number.isFinite(providedAngle) ? providedAngle : calculateAngleFromGroundDeg(accelRaw);
+  const providedHeading = parseNumeric(fields.headingDeg);
+  const headingDeg = Number.isFinite(providedHeading)
+    ? providedHeading
+    : calculateTiltCompensatedHeadingDeg(accelRaw, magRaw);
+  return {
+    distance: correctDistanceForSensorAngle(distanceCm, angleFromGroundDeg),
+    rawDistance: distanceCm,
+    angleFromGroundDeg,
+    headingDeg,
+    accelRaw,
+    magRaw,
+    error,
+  };
+}
 function parsePayload(raw) {
   const text = String(raw || "").trim();
   if (!text) return { distance: NaN, error: "payload vazio" };
   if (/^(err|erro)/i.test(text)) return { distance: NaN, error: text };
+  const textFields = {
+    accelRaw: pickVectorFromText(text, ["ACC_RAW", "ACCEL_RAW", "ACCEL", "ACC", "A"]),
+    magRaw: pickVectorFromText(text, ["MAG_RAW", "MAG", "M"]),
+  };
   if (text.startsWith("{") || text.startsWith("[")) {
-    try { const o = JSON.parse(text); const d = pickDistanceFromObject(o); if (Number.isFinite(d)) return { distance: d, error: null }; }
+    try {
+      const o = JSON.parse(text);
+      const d = pickDistanceFromObject(o);
+      if (Number.isFinite(d)) {
+        return buildParsedPayload(d, null, {
+          accelRaw: pickVectorFromObject(o, ["acc_raw","accel_raw","accel","accelerometer","accelerometerRaw"]),
+          magRaw: pickVectorFromObject(o, ["mag_raw","mag","magnetometer","magnetometerRaw"]),
+          angleFromGroundDeg: o.angleFromGroundDeg ?? o.angle_deg ?? o.angleDeg,
+          headingDeg: o.headingDeg ?? o.heading_deg,
+        });
+      }
+    }
     catch (_) {}
   }
   const pf = text.match(/(?:dist|distance)\s*[:=]\s*(-?\d+(?:[.,]\d+)?)/i);
-  if (pf) { const d = parseNumeric(pf[1]); if (Number.isFinite(d)) return { distance: d, error: null }; }
+  if (pf) { const d = parseNumeric(pf[1]); if (Number.isFinite(d)) return buildParsedPayload(d, null, textFields); }
   const direct = parseNumeric(text);
-  if (Number.isFinite(direct)) return { distance: direct, error: null };
+  if (Number.isFinite(direct)) return buildParsedPayload(direct, null, textFields);
   const fn = text.match(/-?\d+(?:[.,]\d+)?/);
-  if (fn) { const d = parseNumeric(fn[0]); if (Number.isFinite(d)) return { distance: d, error: null }; }
+  if (fn) { const d = parseNumeric(fn[0]); if (Number.isFinite(d)) return buildParsedPayload(d, null, textFields); }
   return { distance: NaN, error: "payload sem distancia valida" };
 }
 function slopeMetersPerSecond(samples) {
@@ -460,13 +565,14 @@ const bridge = (() => {
     },
     onDataReceived(raw) {
       const parsed = parsePayload(raw); const ts = Date.now();
-      if (Number.isFinite(parsed.distance) && parsed.distance < MIN_VALID_DISTANCE_CM) {
+      const validationDistance = Number.isFinite(parsed.rawDistance) ? parsed.rawDistance : parsed.distance;
+      if (Number.isFinite(validationDistance) && validationDistance < MIN_VALID_DISTANCE_CM) {
         state.rawLog = [...state.rawLog.slice(-149), String(raw || "")];
         emit();
         return;
       }
       if (Number.isFinite(parsed.distance) && discardNextDistanceSample) { discardNextDistanceSample = false; return; }
-      state.lastData = { distance: parsed.distance, error: parsed.error, raw: String(raw || ""), ts };
+      state.lastData = { ...parsed, raw: String(raw || ""), ts };
       if (Number.isFinite(parsed.distance)) {
         state.distanceSamples = [...state.distanceSamples.slice(-MAX_HISTORY_POINTS + 1), { ts, distance: parsed.distance }];
       }
@@ -1257,8 +1363,14 @@ function DebugPanel({ ble, debugInfo }) {
   const rawLines = Array.isArray(ble?.rawLog) ? ble.rawLog.slice(-18).reverse() : [];
   const distanceSamples = Array.isArray(ble?.distanceSamples) ? ble.distanceSamples : [];
   const lastDistance = ble?.lastData && Number.isFinite(ble.lastData.distance) ? ble.lastData.distance : NaN;
+  const rawDistance = ble?.lastData && Number.isFinite(ble.lastData.rawDistance) ? ble.lastData.rawDistance : lastDistance;
+  const angleFromGround = ble?.lastData && Number.isFinite(ble.lastData.angleFromGroundDeg) ? ble.lastData.angleFromGroundDeg : NaN;
+  const headingDeg = ble?.lastData && Number.isFinite(ble.lastData.headingDeg) ? ble.lastData.headingDeg : NaN;
   const rows = [
-    ["Distância ESP", `${fmtNum(lastDistance, 2)} cm`],
+    ["Distancia ESP", `${fmtNum(rawDistance, 2)} cm`],
+    ["Angulo sensor/solo", `${fmtNum(angleFromGround, 2)} deg`],
+    ["Rumo magnetometro", `${fmtNum(headingDeg, 2)} deg`],
+    ["Distancia vertical", `${fmtNum(lastDistance, 2)} cm`],
     ["Pós-processamento", `${fmtNum(debugInfo?.filteredDistance, 2)} cm`],
     ["Velocidade", `${fmtNum(debugInfo?.velocityMpm, 4)} m/min`],
     ["Vazão 10s", `${fmtNum(debugInfo?.flow10, 3)} L/min`],
@@ -1288,7 +1400,7 @@ function DebugPanel({ ble, debugInfo }) {
         <div>
           <div style={{ fontSize: 12, color: T.inkMuted, textTransform: "uppercase", letterSpacing: 0.32, marginBottom: 6 }}>Processamento usado</div>
           <div style={{ fontFamily: T.mono, fontSize: 11, color: T.inkMuted, lineHeight: 1.45, background: T.surface1, padding: 10, overflowWrap: "anywhere" }}>
-            parsePayload - descarta &lt; {MIN_VALID_DISTANCE_CM} cm - ignora primeira leitura - filtro robusto 2s mediana/MAD - janela 10s - movimento minimo {MIN_MOTION_CM_PER_10S} cm - limite {MAX_REASONABLE_VELOCITY_M_PER_MIN} m/min
+            parsePayload - recebe DIST/ACC_RAW/MAG_RAW - corrige distancia vertical com seno do angulo - descarta DIST raw &lt; {MIN_VALID_DISTANCE_CM} cm - ignora primeira leitura - filtro robusto 2s mediana/MAD - janela 10s - movimento minimo {MIN_MOTION_CM_PER_10S} cm - limite {MAX_REASONABLE_VELOCITY_M_PER_MIN} m/min
           </div>
         </div>
         <div>
