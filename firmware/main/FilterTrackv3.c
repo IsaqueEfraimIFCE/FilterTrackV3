@@ -22,37 +22,43 @@
 #include "esp_bt_main.h"
 
 // ─── Sensor ultrassônico ───────────────────────────────────────────────────
-#define TRIG_PIN        GPIO_NUM_20
-#define ECHO_PIN        GPIO_NUM_21
-#define SENSOR_PWR_PIN  GPIO_NUM_10
-#define SENSOR_PWR_ON_LEVEL  0  // PNP high-side switch: base low powers the sensor.
-#define SENSOR_PWR_OFF_LEVEL 1  // Base high shuts the sensor down.
-#define SENSOR_PWR_STABILIZE_MS 10
+#define TRIG_PIN        GPIO_NUM_1
+#define ECHO_PIN        GPIO_NUM_0
+#define SENSOR_PWR_ENABLED 0
+#define SENSOR_PWR_PIN  GPIO_NUM_NC
+#define SENSOR_PWR_ON_LEVEL  1
+#define SENSOR_PWR_OFF_LEVEL 0
+#define SENSOR_PWR_STABILIZE_MS 200
 
 #define TIMEOUT_US      30000       // timeout do echo (30 ms)
 #define INTERVALO_MS    100         // intervalo entre leituras (100 ms)
 #define LOW_POWER_INTERVAL_MS 1000  // intervalo no modo baixo consumo (1 s)
 #define WATCHDOG_US     5000000     // 5 s sem leitura válida = erro
 
-// LSM303DLHC - acelerometro + magnetometro
-#define LSM303_I2C_SDA_IO           GPIO_NUM_8
-#define LSM303_I2C_SCL_IO           GPIO_NUM_9
+// Accelerometer I2C wiring for the ESP32-C6 carrier board (SDA=GPIO13, SCL=GPIO12).
+#define LSM303_I2C_SDA_IO           GPIO_NUM_13
+#define LSM303_I2C_SCL_IO           GPIO_NUM_12
 #define LSM303_I2C_MASTER_NUM       I2C_NUM_0
 #define LSM303_I2C_FREQ_HZ          100000
 #define LSM303_I2C_TX_BUF_DISABLE   0
 #define LSM303_I2C_RX_BUF_DISABLE   0
+#define LSM303_I2C_TIMEOUT_MS       100
 
-#define LSM303_ACCEL_ADDR           0x19
-#define LSM303_MAG_ADDR             0x1E
+#define LSM303_ACCEL_ADDR_PRIMARY   0x19
+#define LSM303_ACCEL_ADDR_ALT       0x18
+#define ACCEL_RETRY_INTERVAL_US     2000000
 
 #define CTRL_REG1_A                 0x20
 #define CTRL_REG4_A                 0x23
 #define OUT_X_L_A                   0x28
+#define WHO_AM_I_A                  0x0F
+#define LSM303_WHO_AM_I             0x33
 
-#define CRA_REG_M                   0x00
-#define CRB_REG_M                   0x01
-#define MR_REG_M                    0x02
-#define OUT_X_H_M                   0x03
+#define MPU_ACCEL_ADDR              0x68
+#define MPU_REG_ACCEL_XOUT          0x3B
+#define MPU_REG_PWR_MGMT_1          0x6B
+#define MPU_REG_ACCEL_CFG           0x1C
+#define MPU_REG_WHO_AM_I            0x75
 
 // ─── LEDs de status ───────────────────────────────────────────────────────
 #define LED_RED_PIN     GPIO_NUM_3
@@ -79,6 +85,15 @@ static volatile bool ble_advertising = false;
 static volatile bool sensor_power_on = false;
 static volatile bool lsm303_error = false;
 static bool lsm303_initialized = false;
+static uint8_t lsm303_accel_addr = LSM303_ACCEL_ADDR_PRIMARY;
+
+typedef enum {
+    ACCEL_NONE,
+    ACCEL_LSM303,
+    ACCEL_MPU,
+} accel_type_t;
+
+static accel_type_t accel_type = ACCEL_NONE;
 
 typedef struct {
     int16_t x;
@@ -104,6 +119,10 @@ static void set_status_leds(bool red_on, bool green_on, bool yellow_on)
 
 static void set_sensor_power(bool on)
 {
+#if !SENSOR_PWR_ENABLED
+    sensor_power_on = on;
+    return;
+#else
     if (sensor_power_on == on) {
         return;
     }
@@ -115,6 +134,7 @@ static void set_sensor_power(bool on)
     if (on) {
         vTaskDelay(pdMS_TO_TICKS(SENSOR_PWR_STABILIZE_MS));
     }
+#endif
 }
 
 static void set_low_power_mode(bool enabled)
@@ -199,7 +219,7 @@ static esp_err_t lsm303_i2c_master_init(void)
     );
 }
 
-static esp_err_t lsm303_write_reg(uint8_t dev_addr, uint8_t reg_addr, uint8_t data)
+static esp_err_t accel_write_reg(uint8_t dev_addr, uint8_t reg_addr, uint8_t data)
 {
     uint8_t write_buf[2] = {reg_addr, data};
 
@@ -208,11 +228,11 @@ static esp_err_t lsm303_write_reg(uint8_t dev_addr, uint8_t reg_addr, uint8_t da
         dev_addr,
         write_buf,
         sizeof(write_buf),
-        pdMS_TO_TICKS(1000)
+        pdMS_TO_TICKS(LSM303_I2C_TIMEOUT_MS)
     );
 }
 
-static esp_err_t lsm303_read_regs(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, size_t len)
+static esp_err_t accel_read_regs(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, size_t len)
 {
     return i2c_master_write_read_device(
         LSM303_I2C_MASTER_NUM,
@@ -221,52 +241,112 @@ static esp_err_t lsm303_read_regs(uint8_t dev_addr, uint8_t reg_addr, uint8_t *d
         1,
         data,
         len,
-        pdMS_TO_TICKS(1000)
+        pdMS_TO_TICKS(LSM303_I2C_TIMEOUT_MS)
     );
+}
+
+static void accel_check_idle_pin_levels(void)
+{
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << LSM303_I2C_SDA_IO) | (1ULL << LSM303_I2C_SCL_IO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+
+    ESP_ERROR_CHECK(gpio_config(&io));
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_LOGI(TAG,
+             "I2C idle levels: SDA(GPIO%d)=%d SCL(GPIO%d)=%d; both should be 1",
+             LSM303_I2C_SDA_IO,
+             gpio_get_level(LSM303_I2C_SDA_IO),
+             LSM303_I2C_SCL_IO,
+             gpio_get_level(LSM303_I2C_SCL_IO));
+}
+
+static void accel_i2c_scan(void)
+{
+    int found = 0;
+
+    ESP_LOGI(TAG,
+             "Scanning I2C bus on SDA=GPIO%d SCL=GPIO%d",
+             LSM303_I2C_SDA_IO,
+             LSM303_I2C_SCL_IO);
+
+    for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
+        i2c_master_stop(cmd);
+
+        esp_err_t ret = i2c_master_cmd_begin(
+            LSM303_I2C_MASTER_NUM,
+            cmd,
+            pdMS_TO_TICKS(50)
+        );
+        i2c_cmd_link_delete(cmd);
+
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "I2C ACK at 0x%02X", addr);
+            found++;
+        }
+    }
+
+    ESP_LOGI(TAG, "I2C scan complete: %d device(s) found", found);
+}
+
+static esp_err_t lsm303_init_at(uint8_t addr)
+{
+    uint8_t who = 0;
+    esp_err_t ret = accel_read_regs(addr, WHO_AM_I_A, &who, 1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "LSM303 WHO_AM_I read failed at 0x%02X: %s",
+                 addr, esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "LSM303 accel WHO_AM_I=0x%02X at 0x%02X (expected 0x%02X)",
+             who, addr, LSM303_WHO_AM_I);
+    if (who != LSM303_WHO_AM_I) {
+        ESP_LOGW(TAG, "Unexpected LSM303 WHO_AM_I at 0x%02X; continuing anyway", addr);
+    }
+
+    ret = accel_write_reg(addr, CTRL_REG1_A, 0x57);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Falha ao configurar CTRL_REG1_A do acelerometro: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = accel_write_reg(addr, CTRL_REG4_A, 0x08);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Falha ao configurar CTRL_REG4_A do acelerometro: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    lsm303_accel_addr = addr;
+    return ESP_OK;
 }
 
 static esp_err_t lsm303_init(void)
 {
-    esp_err_t ret;
+    const uint8_t addrs[] = {LSM303_ACCEL_ADDR_PRIMARY, LSM303_ACCEL_ADDR_ALT};
 
-    ret = lsm303_write_reg(LSM303_ACCEL_ADDR, CTRL_REG1_A, 0x57);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Falha ao configurar CTRL_REG1_A do acelerometro");
-        return ret;
+    for (size_t i = 0; i < (sizeof(addrs) / sizeof(addrs[0])); i++) {
+        if (lsm303_init_at(addrs[i]) == ESP_OK) {
+            return ESP_OK;
+        }
     }
 
-    ret = lsm303_write_reg(LSM303_ACCEL_ADDR, CTRL_REG4_A, 0x08);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Falha ao configurar CTRL_REG4_A do acelerometro");
-        return ret;
-    }
-
-    ret = lsm303_write_reg(LSM303_MAG_ADDR, CRA_REG_M, 0x14);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Falha ao configurar CRA_REG_M do magnetometro");
-        return ret;
-    }
-
-    ret = lsm303_write_reg(LSM303_MAG_ADDR, CRB_REG_M, 0x20);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Falha ao configurar CRB_REG_M do magnetometro");
-        return ret;
-    }
-
-    ret = lsm303_write_reg(LSM303_MAG_ADDR, MR_REG_M, 0x00);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Falha ao configurar MR_REG_M do magnetometro");
-        return ret;
-    }
-
-    return ESP_OK;
+    return ESP_FAIL;
 }
 
-static esp_err_t read_accel_raw(vec3i16_t *accel)
+static esp_err_t lsm303_read_accel_raw(vec3i16_t *accel)
 {
-    uint8_t data[6];
+    uint8_t data[6] = {0};
 
-    esp_err_t ret = lsm303_read_regs(LSM303_ACCEL_ADDR, OUT_X_L_A | 0x80, data, 6);
+    esp_err_t ret = accel_read_regs(lsm303_accel_addr, OUT_X_L_A | 0x80, data, sizeof(data));
     if (ret != ESP_OK) {
         return ret;
     }
@@ -282,39 +362,113 @@ static esp_err_t read_accel_raw(vec3i16_t *accel)
     return ESP_OK;
 }
 
-static esp_err_t read_mag_raw(vec3i16_t *mag)
+static esp_err_t mpu_init(void)
 {
-    uint8_t data[6];
-
-    esp_err_t ret = lsm303_read_regs(LSM303_MAG_ADDR, OUT_X_H_M, data, 6);
+    uint8_t who = 0;
+    esp_err_t ret = accel_read_regs(MPU_ACCEL_ADDR, MPU_REG_WHO_AM_I, &who, 1);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MPU WHO_AM_I read failed at 0x%02X: %s",
+                 MPU_ACCEL_ADDR, esp_err_to_name(ret));
         return ret;
     }
 
-    mag->x = (int16_t)((data[0] << 8) | data[1]);
-    mag->z = (int16_t)((data[2] << 8) | data[3]);
-    mag->y = (int16_t)((data[4] << 8) | data[5]);
+    ESP_LOGI(TAG, "MPU WHO_AM_I=0x%02X at address 0x%02X", who, MPU_ACCEL_ADDR);
+
+    ret = accel_write_reg(MPU_ACCEL_ADDR, MPU_REG_PWR_MGMT_1, 0x00);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to wake MPU: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    ret = accel_write_reg(MPU_ACCEL_ADDR, MPU_REG_ACCEL_CFG, 0x00);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set MPU +/-2g range: %s", esp_err_to_name(ret));
+        return ret;
+    }
 
     return ESP_OK;
 }
 
-static bool ler_lsm303_raw(vec3i16_t *accel_raw, vec3i16_t *mag_raw)
+static esp_err_t mpu_read_accel_raw(vec3i16_t *accel)
 {
-    esp_err_t ret = read_accel_raw(accel_raw);
+    uint8_t data[6] = {0};
+    esp_err_t ret = accel_read_regs(MPU_ACCEL_ADDR, MPU_REG_ACCEL_XOUT, data, sizeof(data));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    accel->x = (int16_t)((data[0] << 8) | data[1]);
+    accel->y = (int16_t)((data[2] << 8) | data[3]);
+    accel->z = (int16_t)((data[4] << 8) | data[5]);
+
+    return ESP_OK;
+}
+
+static esp_err_t accel_init_auto(void)
+{
+    if (lsm303_init() == ESP_OK) {
+        accel_type = ACCEL_LSM303;
+        ESP_LOGI(TAG, "Detected LSM303DLHC accelerometer at 0x%02X", lsm303_accel_addr);
+        return ESP_OK;
+    }
+
+    if (mpu_init() == ESP_OK) {
+        accel_type = ACCEL_MPU;
+        ESP_LOGI(TAG, "Detected MPU-style accelerometer/IMU");
+        return ESP_OK;
+    }
+
+    accel_type = ACCEL_NONE;
+    return ESP_FAIL;
+}
+
+static esp_err_t accel_read_raw(vec3i16_t *accel)
+{
+    switch (accel_type) {
+    case ACCEL_LSM303:
+        return lsm303_read_accel_raw(accel);
+    case ACCEL_MPU:
+        return mpu_read_accel_raw(accel);
+    default:
+        return ESP_FAIL;
+    }
+}
+
+static bool ler_accel_raw(vec3i16_t *accel_raw)
+{
+    esp_err_t ret = accel_read_raw(accel_raw);
     if (ret != ESP_OK) {
         lsm303_error = true;
+        lsm303_initialized = false;
+        accel_type = ACCEL_NONE;
         ESP_LOGE(TAG, "Falha ao ler acelerometro: %s", esp_err_to_name(ret));
         return false;
     }
 
-    ret = read_mag_raw(mag_raw);
+    lsm303_error = false;
+    return true;
+}
+
+static bool tentar_iniciar_acelerometro(bool scan_bus)
+{
+    if (scan_bus) {
+        accel_i2c_scan();
+    }
+
+    esp_err_t ret = accel_init_auto();
     if (ret != ESP_OK) {
+        lsm303_initialized = false;
         lsm303_error = true;
-        ESP_LOGE(TAG, "Falha ao ler magnetometro: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Falha ao iniciar acelerometro; tentando novamente em %d ms",
+                 ACCEL_RETRY_INTERVAL_US / 1000);
         return false;
     }
 
+    lsm303_initialized = true;
     lsm303_error = false;
+    ESP_LOGI(TAG, "Acelerometro pronto para leitura raw");
     return true;
 }
 
@@ -372,10 +526,9 @@ static bool enviar_notificacao_ble(const char *msg)
 static void enviar_medidas_ble(bool distancia_ok,
                                float distancia_cm,
                                bool raw_ok,
-                               vec3i16_t accel_raw,
-                               vec3i16_t mag_raw)
+                               vec3i16_t accel_raw)
 {
-    char ble_msg[64];
+    char ble_msg[48];
     int offset = 0;
 
     if (distancia_ok) {
@@ -392,14 +545,6 @@ static void enviar_medidas_ble(bool distancia_ok,
             accel_raw.x,
             accel_raw.y,
             accel_raw.z
-        );
-        offset += snprintf(
-            ble_msg + offset,
-            sizeof(ble_msg) - offset,
-            ";M=%d,%d,%d",
-            mag_raw.x,
-            mag_raw.y,
-            mag_raw.z
         );
     } else {
         offset += snprintf(ble_msg + offset, sizeof(ble_msg) - offset, ";RAW=ERRO");
@@ -627,12 +772,14 @@ void app_main(void)
     };
     gpio_config(&io_conf);
 
+#if SENSOR_PWR_ENABLED
     io_conf.pin_bit_mask  = (1ULL << SENSOR_PWR_PIN);
     io_conf.mode          = GPIO_MODE_OUTPUT;
     io_conf.pull_up_en    = GPIO_PULLUP_DISABLE;
     io_conf.pull_down_en  = GPIO_PULLDOWN_DISABLE;
     gpio_config(&io_conf);
     set_sensor_power(true);
+#endif
 
     io_conf.pin_bit_mask  = (1ULL << ECHO_PIN);
     io_conf.mode          = GPIO_MODE_INPUT;
@@ -668,26 +815,21 @@ void app_main(void)
     esp_ble_gatts_app_register(0);
     esp_ble_gatt_set_local_mtu(128);
 
+    accel_check_idle_pin_levels();
+
     esp_err_t ret = lsm303_i2c_master_init();
     if (ret != ESP_OK) {
         lsm303_error = true;
-        ESP_LOGE(TAG, "Falha ao iniciar I2C do LSM303: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Falha ao iniciar I2C do acelerometro: %s", esp_err_to_name(ret));
     } else {
-        ret = lsm303_init();
-        if (ret != ESP_OK) {
-            lsm303_error = true;
-            ESP_LOGE(TAG, "Falha ao iniciar LSM303: %s", esp_err_to_name(ret));
-        } else {
-            lsm303_initialized = true;
-            lsm303_error = false;
-            ESP_LOGI(TAG, "LSM303 pronto para leitura raw");
-        }
+        tentar_iniciar_acelerometro(true);
     }
 
     ESP_LOGI(TAG, "FilterTrack BLE pronto!");
 
     // ── Loop principal ────────────────────────────────────────────────────
     int64_t ultimo_envio_us = esp_timer_get_time();
+    int64_t ultimo_retry_accel_us = 0;
     while (1) {
         int64_t agora = esp_timer_get_time();
 
@@ -703,30 +845,29 @@ void app_main(void)
         }
 
         vec3i16_t accel_raw = {0};
-        vec3i16_t mag_raw = {0};
         bool raw_ok = false;
 
         if (lsm303_initialized) {
-            raw_ok = ler_lsm303_raw(&accel_raw, &mag_raw);
+            raw_ok = ler_accel_raw(&accel_raw);
+        } else if ((agora - ultimo_retry_accel_us) >= ACCEL_RETRY_INTERVAL_US) {
+            ultimo_retry_accel_us = agora;
+            tentar_iniciar_acelerometro(true);
         }
 
         float distancia_cm = medir_distancia_cm();
         bool distancia_ok = distancia_cm > 0.0f;
         agora = esp_timer_get_time();
 
-        char msg[128];
+        char msg[64];
         if (distancia_ok && raw_ok) {
             snprintf(
                 msg,
                 sizeof(msg),
-                "DIST=%.2f;ACC_RAW=%d,%d,%d;MAG_RAW=%d,%d,%d",
+                "DIST=%.2f;ACC_RAW=%d,%d,%d",
                 distancia_cm,
                 accel_raw.x,
                 accel_raw.y,
-                accel_raw.z,
-                mag_raw.x,
-                mag_raw.y,
-                mag_raw.z
+                accel_raw.z
             );
         } else if (distancia_ok) {
             snprintf(msg, sizeof(msg), "DIST=%.2f;RAW=ERRO", distancia_cm);
@@ -734,13 +875,10 @@ void app_main(void)
             snprintf(
                 msg,
                 sizeof(msg),
-                "DIST=ERRO;ACC_RAW=%d,%d,%d;MAG_RAW=%d,%d,%d",
+                "DIST=ERRO;ACC_RAW=%d,%d,%d",
                 accel_raw.x,
                 accel_raw.y,
-                accel_raw.z,
-                mag_raw.x,
-                mag_raw.y,
-                mag_raw.z
+                accel_raw.z
             );
         } else {
             snprintf(msg, sizeof(msg), "DIST=ERRO;RAW=ERRO");
@@ -749,7 +887,7 @@ void app_main(void)
         ESP_LOGI(TAG, "%s", msg);
 
         if (device_connected) {
-            enviar_medidas_ble(distancia_ok, distancia_cm, raw_ok, accel_raw, mag_raw);
+            enviar_medidas_ble(distancia_ok, distancia_cm, raw_ok, accel_raw);
         }
 
         if (distancia_ok) {
