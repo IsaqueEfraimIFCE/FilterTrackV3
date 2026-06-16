@@ -149,6 +149,8 @@ Export routes:
 
 Sessions CSV includes flow fields such as availability, L/min, direction, distance start/end, and distance change.
 
+On Android WebView, `downloadBiFile()` uses `window.FilterTrackAndroid.downloadBiFile()` when available. The native activity validates that the URL is a FilterTrack BI export URL, adds BI access credentials through the native request, and saves the file through Android `DownloadManager`. Browser users keep the normal anchor-download fallback.
+
 ## Responsive Design Notes
 
 Recent mobile fixes:

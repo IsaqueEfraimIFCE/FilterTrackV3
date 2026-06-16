@@ -322,24 +322,36 @@ function normalizeVec3(v) {
   const norm = Math.sqrt((v.x * v.x) + (v.y * v.y) + (v.z * v.z));
   return norm > 0.000001 ? { x: v.x / norm, y: v.y / norm, z: v.z / norm } : null;
 }
+// Rolling IMU buffer — component-wise median over last 20 samples (~2 s at 100 ms cadence)
+const IMU_BUF_SIZE = 20;
+const _imuBuf = { accel: [] };
+function resetImuBuf() { _imuBuf.accel = []; }
+function _pushImuSample(accelRaw) {
+  if (accelRaw) _imuBuf.accel = [..._imuBuf.accel.slice(-(IMU_BUF_SIZE - 1)), accelRaw];
+}
+function _medianF(arr) {
+  if (!arr.length) return NaN;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = (s.length - 1) / 2;
+  return (s[Math.floor(m)] + s[Math.ceil(m)]) / 2;
+}
+function _medianVec3(samples) {
+  if (!samples.length) return null;
+  return { x: _medianF(samples.map(v => v.x)), y: _medianF(samples.map(v => v.y)), z: _medianF(samples.map(v => v.z)) };
+}
+function _filteredAccel() {
+  const buf = _imuBuf.accel;
+  if (!buf.length) return null;
+  return buf.length < 2 ? buf[buf.length - 1] : _medianVec3(buf);
+}
 function calculateAngleFromGroundDeg(accelRaw) {
   const gravity = normalizeVec3(accelRaw);
   if (!gravity) return NaN;
   const dot = clamp(gravity.z, -1, 1);
-  const angleFromVertical = Math.acos(Math.abs(dot)) * DEG_PER_RAD;
-  return 90 - angleFromVertical;
-}
-function calculateTiltCompensatedHeadingDeg(accelRaw, magRaw) {
-  const a = normalizeVec3(accelRaw), m = normalizeVec3(magRaw);
-  if (!a || !m) return NaN;
-  const roll = Math.atan2(a.y, a.z);
-  const pitch = Math.atan2(-a.x, Math.sqrt((a.y * a.y) + (a.z * a.z)));
-  const magXComp = (m.x * Math.cos(pitch)) + (m.z * Math.sin(pitch));
-  const magYComp = (m.x * Math.sin(roll) * Math.sin(pitch)) +
-    (m.y * Math.cos(roll)) - (m.z * Math.sin(roll) * Math.cos(pitch));
-  let heading = Math.atan2(-magYComp, magXComp) * DEG_PER_RAD;
-  if (heading < 0) heading += 360;
-  return heading;
+  // Sensor is mounted 90° from accelerometer Z-axis:
+  // angleFromVertical of Z = 0° → ultrasonic points horizontally (0° from ground)
+  // angleFromVertical of Z = 90° → ultrasonic points straight down (90° from ground)
+  return Math.acos(Math.abs(dot)) * DEG_PER_RAD;
 }
 function correctDistanceForSensorAngle(distanceCm, angleFromGroundDeg) {
   if (!Number.isFinite(distanceCm) || !Number.isFinite(angleFromGroundDeg)) return distanceCm;
@@ -348,30 +360,28 @@ function correctDistanceForSensorAngle(distanceCm, angleFromGroundDeg) {
 }
 function buildParsedPayload(distanceCm, error, fields = {}) {
   const accelRaw = fields.accelRaw || null;
-  const magRaw = fields.magRaw || null;
+  _pushImuSample(accelRaw);
+  const filteredAccel = _filteredAccel();
   const providedAngle = parseNumeric(fields.angleFromGroundDeg ?? fields.angleDeg);
-  const angleFromGroundDeg = Number.isFinite(providedAngle) ? providedAngle : calculateAngleFromGroundDeg(accelRaw);
-  const providedHeading = parseNumeric(fields.headingDeg);
-  const headingDeg = Number.isFinite(providedHeading)
-    ? providedHeading
-    : calculateTiltCompensatedHeadingDeg(accelRaw, magRaw);
+  const angleFromGroundDeg = Number.isFinite(providedAngle) ? providedAngle : calculateAngleFromGroundDeg(filteredAccel);
   return {
     distance: correctDistanceForSensorAngle(distanceCm, angleFromGroundDeg),
     rawDistance: distanceCm,
     angleFromGroundDeg,
-    headingDeg,
     accelRaw,
-    magRaw,
+    accelError: !!fields.accelError,
     error,
   };
 }
 function parsePayload(raw) {
   const text = String(raw || "").trim();
-  if (!text) return { distance: NaN, error: "payload vazio" };
-  if (/^(err|erro)/i.test(text)) return { distance: NaN, error: text };
+  if (!text) return { distance: NaN, accelError: false, error: "payload vazio" };
+  if (/^(err|erro)/i.test(text)) return { distance: NaN, accelError: false, error: text };
+  const distErro = /(?:^|;)\s*(?:dist|d)\s*=\s*erro\b/i.test(text);
+  const accelErro = /\braw\s*=\s*erro\b/i.test(text);
   const textFields = {
-    accelRaw: pickVectorFromText(text, ["ACC_RAW", "ACCEL_RAW", "ACCEL", "ACC", "A"]),
-    magRaw: pickVectorFromText(text, ["MAG_RAW", "MAG", "M"]),
+    accelRaw: accelErro ? null : pickVectorFromText(text, ["ACC_RAW", "ACCEL_RAW", "ACCEL", "ACC", "A"]),
+    accelError: accelErro,
   };
   if (text.startsWith("{") || text.startsWith("[")) {
     try {
@@ -380,21 +390,25 @@ function parsePayload(raw) {
       if (Number.isFinite(d)) {
         return buildParsedPayload(d, null, {
           accelRaw: pickVectorFromObject(o, ["acc_raw","accel_raw","accel","accelerometer","accelerometerRaw"]),
-          magRaw: pickVectorFromObject(o, ["mag_raw","mag","magnetometer","magnetometerRaw"]),
           angleFromGroundDeg: o.angleFromGroundDeg ?? o.angle_deg ?? o.angleDeg,
-          headingDeg: o.headingDeg ?? o.heading_deg,
+          accelError: accelErro,
         });
       }
     }
     catch (_) {}
   }
-  const pf = text.match(/(?:dist|distance)\s*[:=]\s*(-?\d+(?:[.,]\d+)?)/i);
+  if (distErro) {
+    _pushImuSample(textFields.accelRaw);
+    return { distance: NaN, rawDistance: NaN, angleFromGroundDeg: NaN,
+             accelRaw: textFields.accelRaw, accelError: accelErro, error: "DIST=ERRO" };
+  }
+  const pf = text.match(/(?:^|;)\s*(?:dist|distance|d)\s*[:=]\s*(-?\d+(?:[.,]\d+)?)/i);
   if (pf) { const d = parseNumeric(pf[1]); if (Number.isFinite(d)) return buildParsedPayload(d, null, textFields); }
   const direct = parseNumeric(text);
   if (Number.isFinite(direct)) return buildParsedPayload(direct, null, textFields);
   const fn = text.match(/-?\d+(?:[.,]\d+)?/);
   if (fn) { const d = parseNumeric(fn[0]); if (Number.isFinite(d)) return buildParsedPayload(d, null, textFields); }
-  return { distance: NaN, error: "payload sem distancia valida" };
+  return { distance: NaN, accelError: false, error: "payload sem distancia valida" };
 }
 function slopeMetersPerSecond(samples) {
   if (!Array.isArray(samples) || samples.length < 2) return NaN;
@@ -541,7 +555,7 @@ const bridge = (() => {
   const emit = () => listeners.forEach(fn => fn(state));
   const subscribe = fn => { listeners.add(fn); fn(state); return () => listeners.delete(fn); };
   const armFirstReadingDiscard = () => { discardNextDistanceSample = true; };
-  const clearReadingBuffers = () => { state.distanceSamples = []; state.rawLog = []; state.lastData = null; };
+  const clearReadingBuffers = () => { state.distanceSamples = []; state.rawLog = []; state.lastData = null; resetImuBuf(); };
   window.FilterTrackBridge = {
     onScanStateChanged(scanning) {
       state.scanning = !!scanning; if (state.scanning) state.devices = []; emit();
@@ -1365,11 +1379,11 @@ function DebugPanel({ ble, debugInfo }) {
   const lastDistance = ble?.lastData && Number.isFinite(ble.lastData.distance) ? ble.lastData.distance : NaN;
   const rawDistance = ble?.lastData && Number.isFinite(ble.lastData.rawDistance) ? ble.lastData.rawDistance : lastDistance;
   const angleFromGround = ble?.lastData && Number.isFinite(ble.lastData.angleFromGroundDeg) ? ble.lastData.angleFromGroundDeg : NaN;
-  const headingDeg = ble?.lastData && Number.isFinite(ble.lastData.headingDeg) ? ble.lastData.headingDeg : NaN;
+  const accelError = ble?.lastData?.accelError === true;
   const rows = [
     ["Distancia ESP", `${fmtNum(rawDistance, 2)} cm`],
+    ["Acelerometro", accelError ? "ERRO" : (ble?.lastData ? "OK" : "--")],
     ["Angulo sensor/solo", `${fmtNum(angleFromGround, 2)} deg`],
-    ["Rumo magnetometro", `${fmtNum(headingDeg, 2)} deg`],
     ["Distancia vertical", `${fmtNum(lastDistance, 2)} cm`],
     ["Pós-processamento", `${fmtNum(debugInfo?.filteredDistance, 2)} cm`],
     ["Velocidade", `${fmtNum(debugInfo?.velocityMpm, 4)} m/min`],
@@ -1400,7 +1414,7 @@ function DebugPanel({ ble, debugInfo }) {
         <div>
           <div style={{ fontSize: 12, color: T.inkMuted, textTransform: "uppercase", letterSpacing: 0.32, marginBottom: 6 }}>Processamento usado</div>
           <div style={{ fontFamily: T.mono, fontSize: 11, color: T.inkMuted, lineHeight: 1.45, background: T.surface1, padding: 10, overflowWrap: "anywhere" }}>
-            parsePayload - recebe DIST/ACC_RAW/MAG_RAW - corrige distancia vertical com seno do angulo - descarta DIST raw &lt; {MIN_VALID_DISTANCE_CM} cm - ignora primeira leitura - filtro robusto 2s mediana/MAD - janela 10s - movimento minimo {MIN_MOTION_CM_PER_10S} cm - limite {MAX_REASONABLE_VELOCITY_M_PER_MIN} m/min
+            parsePayload - recebe DIST/ACC_RAW - angulo sensor = acos(|gz|) [offset 90° fisico] - corrige distancia vertical com seno do angulo - filtro IMU: mediana 20 amostras (2s) no acelerometro - descarta DIST raw &lt; {MIN_VALID_DISTANCE_CM} cm - ignora primeira leitura - filtro robusto 2s mediana/MAD - janela 10s - movimento minimo {MIN_MOTION_CM_PER_10S} cm - limite {MAX_REASONABLE_VELOCITY_M_PER_MIN} m/min
           </div>
         </div>
         <div>

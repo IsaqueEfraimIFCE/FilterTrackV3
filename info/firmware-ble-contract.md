@@ -2,13 +2,32 @@
 
 ## Source Context
 
-The firmware source is outside this repo. Previous workspace notes referenced:
+The firmware source is now in this repo:
+
+```text
+firmware/main/FilterTrackv3.c
+```
+
+Related project files:
+
+```text
+firmware/CMakeLists.txt
+firmware/main/CMakeLists.txt
+firmware/main/idf_component.yml
+firmware/dependencies.lock
+firmware/sdkconfig
+```
+
+Treat `firmware/build/` as generated ESP-IDF output and `firmware/managed_components/` as dependency/vendor code unless a task explicitly targets them.
+
+Older workspace notes referenced external copies under:
 
 ```text
 C:\Users\Isaque\Desktop\FilterTrackv3espc6\main\FilterTrackv3.c
+C:\Users\Isaque\Desktop\FilterTrackv3espc3\main\FilterTrackv3.c
 ```
 
-Use this file if available when changing BLE protocol assumptions.
+Use the in-repo file as the current implementation authority.
 
 ## Advertised Device
 
@@ -40,15 +59,39 @@ The characteristic should support notifications and writes. The Android code fal
 
 ## Notifications
 
-Firmware sends distance notifications roughly every `100 ms` in normal mode.
+Firmware reads and notifies roughly every `100 ms` in normal mode.
 
-Observed payload format:
+Legacy payload format:
 
 ```text
 DIST=%.2f
 ```
 
-The WebView parser is tolerant and can also extract distances from numeric strings or JSON-like payloads.
+Current ESP32-C3 firmware can also send raw LSM303DLHC readings:
+
+```text
+DIST=%.2f;ACC_RAW=%d,%d,%d;MAG_RAW=%d,%d,%d
+```
+
+If one source fails, firmware can notify:
+
+```text
+DIST=%.2f;RAW=ERRO
+DIST=ERRO;ACC_RAW=%d,%d,%d;MAG_RAW=%d,%d,%d
+DIST=ERRO;RAW=ERRO
+ERRO_TIMEOUT
+```
+
+The BLE notify helper splits long raw-measurement payloads into compact chunks:
+
+```text
+D=%.2f
+A=%d,%d,%d
+M=%d,%d,%d
+RAW=ERRO
+```
+
+The WebView parser remains tolerant of old distance-only payloads, numeric strings, and JSON-like payloads. When `ACC_RAW` is present, Android computes the sensor Z-axis angle from the ground and uses `DIST * sin(angle)` as the corrected vertical distance for live flow/session samples. `MAG_RAW` is parsed for debug heading display; distance correction uses the accelerometer angle.
 
 ## Commands
 
@@ -66,11 +109,39 @@ App behavior around commands:
 - Restart command finalizes and saves any active session, sends command `0`, keeps the app scanning for reconnection, and avoids reopening filter selection when the device reconnects automatically.
 - Commands use the app's own confirmation modal rather than `window.confirm`.
 
+Firmware behavior around commands:
+
+- Command `0` calls `esp_restart()`.
+- Command `1` enables low-power mode, powers down the ultrasonic sensor through `SENSOR_PWR_PIN`, clears sensor error state, and keeps BLE active.
+- Command `2` disables low-power mode and powers the ultrasonic sensor back on.
+
+## Firmware Hardware Pins
+
+Current pin assignments in `firmware/main/FilterTrackv3.c`:
+
+```text
+Ultrasonic trigger: GPIO20
+Ultrasonic echo:    GPIO21
+Sensor power:       GPIO10
+LSM303 I2C SDA:     GPIO8
+LSM303 I2C SCL:     GPIO9
+Red LED:            GPIO3
+Green LED:          GPIO4
+Yellow LED:         GPIO2
+```
+
+Status LED behavior:
+
+- Yellow on: low-power mode.
+- Red on: Bluetooth, ultrasonic, or LSM303 error.
+- Green on: BLE device connected.
+- Red blinking: advertising or active sensor reading while disconnected.
+
 ## Sensor Filtering Expectations
 
 Current app-side filtering assumes:
 
-- Raw distances below `25 cm` are invalid.
+- Raw ultrasonic `DIST` values below `25 cm` are invalid.
 - First reading after connect/command reset is ignored.
 - Robust median/MAD filtering over recent samples is needed due to sensor noise.
 - The flow window is 10 seconds.

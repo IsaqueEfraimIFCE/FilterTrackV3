@@ -101,14 +101,29 @@ Current Android UI behavior
 
 Firmware command source
 -----------------------
-- Read from:
-  C:\Users\Isaque\Desktop\FilterTrackv3espc6\main\FilterTrackv3.c
+- Current in-repo ESP-IDF firmware source:
+  firmware/main/FilterTrackv3.c
+- Related firmware context:
+  firmware/CMakeLists.txt, firmware/main/CMakeLists.txt,
+  firmware/main/idf_component.yml, firmware/dependencies.lock, firmware/sdkconfig.
+- Treat firmware/build/ as generated output and firmware/managed_components/ as
+  dependency/vendor code unless a task specifically targets them.
+- Older notes referenced external desktop copies under FilterTrackv3espc6 and
+  FilterTrackv3espc3; the in-repo source is the current implementation authority.
 - tratar_comando_bluetooth:
   - case 0: esp_restart()
   - case 1: set_low_power_mode(true)
   - case 2: set_low_power_mode(false)
-- Firmware sends distance notifications as DIST=%.2f every 100 ms in normal mode.
-- Low-power mode powers down the ultrasonic sensor and keeps BLE active.
+- Firmware reads/notifies every 100 ms in normal mode.
+- Current payloads include distance plus optional raw LSM303DLHC values:
+  DIST=%.2f;ACC_RAW=%d,%d,%d;MAG_RAW=%d,%d,%d
+- Error/fallback payloads can include DIST=%.2f;RAW=ERRO,
+  DIST=ERRO;ACC_RAW=...;MAG_RAW=..., DIST=ERRO;RAW=ERRO, and ERRO_TIMEOUT.
+- BLE notification splitting can send compact D=, A=, M=, or RAW=ERRO chunks.
+- Low-power mode powers down the ultrasonic sensor through GPIO10 and keeps BLE active.
+- Current firmware pins: trigger GPIO20, echo GPIO21, sensor power GPIO10,
+  LSM303 SDA GPIO8, LSM303 SCL GPIO9, red LED GPIO3, green LED GPIO4,
+  yellow LED GPIO2.
 
 Android WebView build/source caveat
 -----------------------------------
@@ -122,6 +137,9 @@ BI dashboard notes
 ------------------
 - BiDashboardActivity.kt loads: https://filtertrack-api.fly.dev/bi
 - It injects BI user key into localStorage("filtertrack.bi.key") and clicks #loginBtn.
+- BI export downloads in Android WebView use native window.FilterTrackAndroid
+  bridge + Android DownloadManager, restricted to /filtertrack/bi/export/* URLs,
+  with browser anchor downloads kept as fallback.
 - The static source in this repo is backend-fastapi/app/static/bi.html.
 - Mobile BI fixes made locally on 2026-05-06:
   - line/bar charts fit the phone viewport instead of using wide horizontal charts;

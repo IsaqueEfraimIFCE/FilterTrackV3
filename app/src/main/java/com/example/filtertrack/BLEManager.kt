@@ -1,4 +1,4 @@
-package com.example.filtertrack
+package com.filtertrack
 
 import android.annotation.SuppressLint
 import android.bluetooth.*
@@ -55,6 +55,27 @@ class BLEManager private constructor(private val context: Context) {
     private val MAX_WRITE_RETRIES = 5
     private val WRITE_TIMEOUT_MS = 3000L
     private val WRITE_NO_RESPONSE_GAP_MS = 40L
+
+    private val pendingPayload = StringBuilder()
+
+    private fun handleRawBleData(s: String) {
+        when {
+            s.startsWith("D=") -> {
+                val prev = pendingPayload.toString()
+                pendingPayload.clear()
+                pendingPayload.append(s)
+                if (prev.isNotEmpty()) dataListener?.onDataReceived(prev)
+            }
+            pendingPayload.isEmpty() -> {
+                // Standalone message (e.g. ERRO_TIMEOUT) — dispatch immediately.
+                dataListener?.onDataReceived(s)
+            }
+            else -> {
+                // Continuation chunk for the current D= payload.
+                pendingPayload.append(s)
+            }
+        }
+    }
 
     private val writeTimeoutRunnable = Runnable {
         // Callback never fired — assume the write was lost and try to recover.
@@ -160,7 +181,7 @@ class BLEManager private constructor(private val context: Context) {
             @Suppress("DEPRECATION")
             val data = characteristic?.value ?: return
             val s = String(data)
-            handler.post { dataListener?.onDataReceived(s) }
+            handler.post { handleRawBleData(s) }
         }
 
         override fun onCharacteristicChanged(
@@ -169,7 +190,7 @@ class BLEManager private constructor(private val context: Context) {
             value: ByteArray
         ) {
             val s = String(value)
-            handler.post { dataListener?.onDataReceived(s) }
+            handler.post { handleRawBleData(s) }
         }
 
         override fun onReadRemoteRssi(gatt: BluetoothGatt?, rssi: Int, status: Int) {
@@ -225,6 +246,7 @@ class BLEManager private constructor(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun closeGatt() {
+        pendingPayload.clear()
         bluetoothGatt?.let {
             try { it.disconnect() } catch (_: Throwable) {}
             try { it.close() } catch (_: Throwable) {}

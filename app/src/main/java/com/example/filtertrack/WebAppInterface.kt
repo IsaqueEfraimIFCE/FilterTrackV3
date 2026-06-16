@@ -1,4 +1,4 @@
-package com.example.filtertrack
+package com.filtertrack
 
 import android.webkit.JavascriptInterface
 

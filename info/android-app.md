@@ -194,4 +194,6 @@ https://filtertrack-api.fly.dev/bi
 
 It auto-injects a user access key into BI localStorage and clicks the login button. Do not copy the key into docs.
 
+BI export downloads are routed through a native JavaScript bridge named `window.FilterTrackAndroid`. The bridge accepts only `https://filtertrack-api.fly.dev/filtertrack/bi/export/` URLs and enqueues them with Android `DownloadManager`, so downloads work inside Android WebView instead of depending on synthetic `<a download>` clicks.
+
 If BI fails to load, the activity routes back to the initial app screen with an error toast.

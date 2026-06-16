@@ -12,6 +12,8 @@ FilterTrack is an Android-based field collection app for monitoring filter water
 - `backend-fastapi/` - production FastAPI backend and BI static page.
 - `backend-fastapi/app/static/bi.html` - BI dashboard served by the backend at `/bi`.
 - `backend-fastapi/app/data/default_filters.json` - default filter catalog extracted from the Android catalog.
+- `firmware/` - ESP-IDF firmware project for the BLE ultrasonic sensor.
+- `firmware/main/FilterTrackv3.c` - primary firmware source for BLE advertising, notifications, commands, ultrasonic reads, LSM303 raw reads, and status LEDs.
 - `app/src/main/assets/` - WebView asset bundle and Cagece images used by the Android app.
 - `context.txt` - older consolidated working context. Useful, but not authoritative.
 - `info/` - AI handoff context files.
@@ -31,6 +33,7 @@ The active production path is:
 - Android native shell: Kotlin, Android WebView, BLE GATT APIs.
 - WebView app UI: standalone React loaded from CDN inside `index.html`.
 - Backend: FastAPI, SQLAlchemy, SQLite.
+- Firmware: ESP-IDF for ESP32-C3, BLE GATT server, ultrasonic GPIO timing, LSM303DLHC I2C raw readings.
 - Deployment: Fly.io app `filtertrack-api`, region `gru`, one machine, one mounted volume.
 
 ## Current Production State
@@ -51,3 +54,4 @@ Last observed deployment in this workspace:
 - The backend source has local uncommitted changes. Check `git status --short` before assuming a clean baseline.
 - `backend-fastapi/sessions.txt` is intentionally deleted after its useful context was merged into `context.txt`.
 - The BI user key is embedded in `BiDashboardActivity.kt` for auto-login. Do not duplicate that value into public notes.
+- Firmware context should focus on `firmware/main/FilterTrackv3.c`, `firmware/CMakeLists.txt`, `firmware/main/CMakeLists.txt`, `firmware/main/idf_component.yml`, `firmware/dependencies.lock`, and `firmware/sdkconfig`. Treat `firmware/build/` as generated output and `firmware/managed_components/` as vendored dependency code unless the task specifically concerns build products or dependency internals.

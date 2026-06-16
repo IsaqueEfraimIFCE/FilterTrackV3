@@ -22,3 +22,19 @@ backend-fastapi/backups/
 backend-fastapi/filtertrack.db
 __pycache__/
 *.pyc
+release.properties
+keystore.properties
+*.jks
+*.keystore
+
+# ESP-IDF firmware build artifacts and downloaded components
+firmware/build/
+firmware/build-esp32c6/
+firmware/managed_components/
+firmware/**/build/
+firmware/flash.log
+sdkconfig.old
+sdkconfig_esp32c6.old
+
+# Obsidian vault settings
+.obsidian/

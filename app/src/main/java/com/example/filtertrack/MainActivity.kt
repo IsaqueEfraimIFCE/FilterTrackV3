@@ -1,4 +1,4 @@
-package com.example.filtertrack
+package com.filtertrack
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -122,7 +122,7 @@ class MainActivity : AppCompatActivity(),
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         }
-        WebView.setWebContentsDebuggingEnabled(true)
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(msg: ConsoleMessage): Boolean {

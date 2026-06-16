@@ -72,8 +72,9 @@ class AccessContext:
 
 def require_bi_access(
     x_access_key: str | None = Header(default=None, alias="X-Access-Key"),
+    access_key: str | None = Query(default=None, alias="accessKey"),
 ) -> AccessContext:
-    key = (x_access_key or "").strip()
+    key = (x_access_key or access_key or "").strip()
 
     if settings.admin_access_key and key == settings.admin_access_key:
         return AccessContext(role="admin", label="admin")
@@ -102,6 +103,7 @@ def _query_clauses(
     to_date: datetime | None,
     device_address: str | None,
     filter_id: str | None,
+    session_ref: str | None = None,
 ) -> list[Any]:
     clauses = []
     point = func.coalesce(SessionRecord.started_at, SessionRecord.ended_at, SessionRecord.received_at)
@@ -113,6 +115,14 @@ def _query_clauses(
         clauses.append(func.lower(SessionRecord.device_address) == device_address.lower().strip())
     if filter_id:
         clauses.append(func.lower(SessionRecord.filter_id) == filter_id.lower().strip())
+    if session_ref:
+        ref = session_ref.lower().strip()
+        clauses.append(
+            or_(
+                func.lower(SessionRecord.session_id) == ref,
+                func.lower(SessionRecord.ingestion_id) == ref,
+            )
+        )
     return clauses
 
 
@@ -122,9 +132,10 @@ def _records_for_filters(
     to_date: datetime | None,
     device_address: str | None,
     filter_id: str | None,
+    session_ref: str | None = None,
 ) -> list[SessionRecord]:
     stmt = select(SessionRecord).order_by(SessionRecord.received_at.desc())
-    clauses = _query_clauses(from_date, to_date, device_address, filter_id)
+    clauses = _query_clauses(from_date, to_date, device_address, filter_id, session_ref)
     if clauses:
         stmt = stmt.where(and_(*clauses))
     return list(db.execute(stmt).scalars().all())
@@ -292,6 +303,29 @@ def _clean_time_slice(raw: Any) -> dict[str, str] | None:
     if start is None or end is None or end <= start:
         raise HTTPException(status_code=400, detail="Recorte de tempo invalido.")
     return {"from": to_iso_z(start) or "", "to": to_iso_z(end) or ""}
+
+
+def _clean_manual_measurement(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    cleaned: dict[str, Any] = {}
+    for key in (
+        "velocityMpm",
+        "flowLpm",
+        "sensorVelocityMpm",
+        "sensorFlowLpm",
+        "velocityErrorPercent",
+        "flowErrorPercent",
+        "confidencePercent",
+    ):
+        if key in raw:
+            cleaned[key] = _finite_float(raw.get(key))
+    scope = safe_text(raw.get("scope"), 40)
+    if scope:
+        cleaned["scope"] = scope
+    if not any(value is not None for key, value in cleaned.items() if key != "scope"):
+        return None
+    return cleaned
 
 
 def _flow_direction(flow_lpm: float | None) -> str:
@@ -607,8 +641,12 @@ def _apply_session_edit(db: Session, proposal: ChangeProposal) -> None:
         time_slice = _clean_time_slice(changes.get("timeSlice"))
         if time_slice is None:
             raise HTTPException(status_code=400, detail="Recorte de tempo invalido.")
-        _apply_session_time_slice(db, record, filter_data, time_slice)
+        _apply_session_time_slice(db, record, filter_data, time_slice, changes.get("manualMeasurement"))
         return
+
+    manual_measurement = _clean_manual_measurement(changes.get("manualMeasurement"))
+    if manual_measurement is not None:
+        session["manualMeasurement"] = manual_measurement
 
     if "filter" in changes:
         filter_data = _clean_filter(changes.get("filter"))
@@ -631,6 +669,7 @@ def _apply_session_time_slice(
     record: SessionRecord,
     filter_data: dict[str, Any],
     time_slice: dict[str, str],
+    manual_measurement: Any = None,
 ) -> None:
     start = parse_iso_or_none(time_slice.get("from"))
     end = parse_iso_or_none(time_slice.get("to"))
@@ -648,9 +687,13 @@ def _apply_session_time_slice(
     if not selected:
         raise HTTPException(status_code=400, detail="Recorte sem amostras.")
 
+    cleaned_measurement = _clean_manual_measurement(manual_measurement)
+
     if not remaining:
         session["filter"] = filter_data
         session["samples"] = _compact_from_points(selected, scale)
+        if cleaned_measurement is not None:
+            session["manualMeasurement"] = cleaned_measurement
         selected_start, selected_end = _point_bounds(selected)
         session["startedAt"] = to_iso_z(selected_start)
         session["endedAt"] = to_iso_z(selected_end)
@@ -689,6 +732,8 @@ def _apply_session_time_slice(
     slice_session["samples"] = _compact_from_points(selected, scale)
     slice_session["splitFromSessionId"] = record.session_id
     slice_session["timeSlice"] = time_slice
+    if cleaned_measurement is not None:
+        slice_session["manualMeasurement"] = cleaned_measurement
 
     slice_payload = dict(payload)
     slice_payload["session"] = slice_session
@@ -1006,15 +1051,16 @@ def bi_overview(
 def bi_sessions(
     db: Session = Depends(get_db),
     access: AccessContext = Depends(require_bi_access),
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: int = Query(default=100, ge=1, le=10000),
     offset: int = Query(default=0, ge=0),
     from_date: datetime | None = Query(default=None, alias="from"),
     to_date: datetime | None = Query(default=None, alias="to"),
     deviceAddress: str | None = Query(default=None),
     filterId: str | None = Query(default=None),
+    sessionRef: str | None = Query(default=None),
 ) -> dict[str, Any]:
     del access
-    clauses = _query_clauses(from_date, to_date, deviceAddress, filterId)
+    clauses = _query_clauses(from_date, to_date, deviceAddress, filterId, sessionRef)
     count_stmt = select(func.count()).select_from(SessionRecord)
     stmt = select(SessionRecord).order_by(SessionRecord.received_at.desc())
     if clauses:
@@ -1052,9 +1098,10 @@ def export_sessions_csv(
     to_date: datetime | None = Query(default=None, alias="to"),
     deviceAddress: str | None = Query(default=None),
     filterId: str | None = Query(default=None),
+    sessionRef: str | None = Query(default=None),
 ) -> Response:
     del access
-    records = _records_for_filters(db, from_date, to_date, deviceAddress, filterId)
+    records = _records_for_filters(db, from_date, to_date, deviceAddress, filterId, sessionRef)
     output = io.StringIO()
     writer = csv.DictWriter(
         output,
@@ -1125,9 +1172,10 @@ def export_samples_csv(
     to_date: datetime | None = Query(default=None, alias="to"),
     deviceAddress: str | None = Query(default=None),
     filterId: str | None = Query(default=None),
+    sessionRef: str | None = Query(default=None),
 ) -> Response:
     del access
-    records = _records_for_filters(db, from_date, to_date, deviceAddress, filterId)
+    records = _records_for_filters(db, from_date, to_date, deviceAddress, filterId, sessionRef)
     output = io.StringIO()
     writer = csv.DictWriter(
         output,
@@ -1152,9 +1200,10 @@ def export_sessions_json(
     to_date: datetime | None = Query(default=None, alias="to"),
     deviceAddress: str | None = Query(default=None),
     filterId: str | None = Query(default=None),
+    sessionRef: str | None = Query(default=None),
 ) -> dict[str, Any]:
     del access
-    records = _records_for_filters(db, from_date, to_date, deviceAddress, filterId)
+    records = _records_for_filters(db, from_date, to_date, deviceAddress, filterId, sessionRef)
     return {
         "ok": True,
         "items": [
@@ -1213,6 +1262,9 @@ def create_proposal(
             time_slice = _clean_time_slice(payload.get("timeSlice"))
             if time_slice is not None:
                 cleaned["timeSlice"] = time_slice
+        manual_measurement = _clean_manual_measurement(payload.get("manualMeasurement"))
+        if manual_measurement is not None:
+            cleaned["manualMeasurement"] = manual_measurement
         if "timeSlice" in cleaned and "filter" not in cleaned:
             raise HTTPException(status_code=400, detail="Recorte de tempo exige filtro alvo.")
         payload = cleaned

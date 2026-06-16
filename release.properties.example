@@ -1,0 +1,9 @@
+# Copy this file to release.properties and keep the copy out of git.
+
+# BI admin key injected into Android release/debug builds for auto-login.
+# Alternative: set FILTERTRACK_BI_ADMIN_KEY in the environment.
+FILTERTRACK_BI_ADMIN_KEY=
+
+# Optional fallback for non-admin BI access.
+# Alternative: set FILTERTRACK_BI_USER_KEY in the environment.
+FILTERTRACK_BI_USER_KEY=
