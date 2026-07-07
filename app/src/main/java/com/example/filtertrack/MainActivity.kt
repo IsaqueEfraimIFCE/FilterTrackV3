@@ -25,7 +25,8 @@ import androidx.core.app.ActivityCompat
 
 class MainActivity : AppCompatActivity(),
     BLEManager.BLEListener,
-    BLEManager.DataListener {
+    BLEManager.DataListener,
+    BLEManager.OtaListener {
 
     companion object {
         const val EXTRA_STARTUP_ERROR = "startup_error"
@@ -65,6 +66,30 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
+    private val firmwarePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) {
+            push("onOtaStatus", "idle", "Seleção de arquivo cancelada")
+            return@registerForActivityResult
+        }
+        val bytes = try {
+            contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        } catch (t: Throwable) {
+            null
+        }
+        when {
+            bytes == null || bytes.isEmpty() ->
+                push("onOtaStatus", "error", "Não foi possível ler o arquivo")
+            bytes.size > 4 * 1024 * 1024 ->
+                push("onOtaStatus", "error", "Arquivo maior que 4 MB")
+            bytes[0] != 0xE9.toByte() ->
+                // Every ESP-IDF app image starts with the 0xE9 magic byte.
+                push("onOtaStatus", "error", "Arquivo não parece um firmware ESP (.bin)")
+            else -> bleManager.startFirmwareUpdate(bytes)
+        }
+    }
+
     private val enableBluetoothLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -88,6 +113,7 @@ class MainActivity : AppCompatActivity(),
         bleManager = BLEManager.getInstance(this)
         bleManager.bleListener = this
         bleManager.dataListener = this
+        bleManager.otaListener = this
 
         webView = findViewById(R.id.webView)
         biButton = findViewById(R.id.biButton)
@@ -165,6 +191,9 @@ class MainActivity : AppCompatActivity(),
             is WebAppInterface.Action.Connect -> bleManager.connect(action.address)
             WebAppInterface.Action.Disconnect -> bleManager.disconnect()
             WebAppInterface.Action.OpenBiDashboard -> openBiDashboard()
+            WebAppInterface.Action.UpdateFirmware ->
+                firmwarePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+            WebAppInterface.Action.CancelFirmwareUpdate -> bleManager.cancelFirmwareUpdate()
             is WebAppInterface.Action.SendCommand -> {
                 val ok = bleManager.sendCommand(action.cmd)
                 if (!ok) push("onError", "Falha ao enviar comando")
@@ -280,6 +309,14 @@ class MainActivity : AppCompatActivity(),
         push("onDataReceived", data)
     }
 
+    override fun onOtaProgress(sent: Int, total: Int) {
+        push("onOtaProgress", sent, total)
+    }
+
+    override fun onOtaStatus(state: String, message: String) {
+        push("onOtaStatus", state, message)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         if (bluetoothReceiverRegistered) {
@@ -288,6 +325,7 @@ class MainActivity : AppCompatActivity(),
         }
         if (bleManager.bleListener === this) bleManager.bleListener = null
         if (bleManager.dataListener === this) bleManager.dataListener = null
+        if (bleManager.otaListener === this) bleManager.otaListener = null
         try {
             webView.destroy()
         } catch (_: Throwable) {

@@ -3,6 +3,12 @@
 The Android app combines a native Kotlin shell with a WebView-hosted React UI.
 The main app surface is `app/src/main/assets/index.html`.
 
+The React/ReactDOM/Babel runtimes are vendored in `app/src/main/assets/vendor/`
+and referenced with relative `src` paths so the app works **without any
+internet connection** (they were previously loaded from the unpkg CDN, which
+made a fresh install render a blank WebView offline). Keep it that way: don't
+reintroduce CDN `<script src>` tags in `index.html`.
+
 ## Primary Files
 
 - `app/src/main/java/com/example/filtertrack/MainActivity.kt`

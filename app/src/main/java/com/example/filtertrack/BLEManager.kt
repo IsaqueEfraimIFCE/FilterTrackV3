@@ -28,11 +28,14 @@ class BLEManager private constructor(private val context: Context) {
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID: UUID =
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-        // ESP32 firmware exposes service 0x00FF with characteristic 0xFF01.
+        // ESP32 firmware exposes service 0x00FF with characteristic 0xFF01
+        // (commands + notifications) and 0xFF02 (OTA firmware data).
         private val FILTERTRACK_SERVICE_UUID: UUID =
             UUID.fromString("000000ff-0000-1000-8000-00805f9b34fb")
         private val FILTERTRACK_CHAR_UUID: UUID =
             UUID.fromString("0000ff01-0000-1000-8000-00805f9b34fb")
+        private val FILTERTRACK_OTA_CHAR_UUID: UUID =
+            UUID.fromString("0000ff02-0000-1000-8000-00805f9b34fb")
     }
 
     private val bluetoothAdapter: BluetoothAdapter? by lazy {
@@ -56,9 +59,42 @@ class BLEManager private constructor(private val context: Context) {
     private val WRITE_TIMEOUT_MS = 3000L
     private val WRITE_NO_RESPONSE_GAP_MS = 40L
 
+    // ── OTA firmware update ─────────────────────────────────────────────
+    // Protocol: "OTA:BEGIN:<size>" on the command char, then raw .bin chunks
+    // as write-no-response on the OTA char; device answers with "OTA=..."
+    // notifications and reboots into the new image on success.
+    private enum class OtaState { IDLE, MTU, WAIT_READY, TRANSFER, WAIT_RESULT }
+
+    private var otaChar: BluetoothGattCharacteristic? = null
+    private var otaState = OtaState.IDLE
+    private var otaData: ByteArray? = null
+    private var otaOffset = 0
+    private var otaChunkSize = 20
+    private var otaLastReported = 0
+    private var negotiatedMtu = 23
+    var otaListener: OtaListener? = null
+
+    private val OTA_READY_TIMEOUT_MS = 10_000L
+    private val OTA_RESULT_TIMEOUT_MS = 30_000L
+    private val OTA_WRITE_FALLBACK_MS = 40L
+    private val OTA_PROGRESS_STEP_BYTES = 16 * 1024
+
+    private val otaPumpRunnable = Runnable { pumpOta() }
+    private val otaMtuTimeoutRunnable = Runnable { if (otaState == OtaState.MTU) beginOtaTransfer() }
+    private val otaReadyTimeoutRunnable = Runnable {
+        if (otaState == OtaState.WAIT_READY) failOta("Sensor não respondeu ao início da atualização")
+    }
+    private val otaResultTimeoutRunnable = Runnable {
+        if (otaState == OtaState.WAIT_RESULT) failOta("Sensor não confirmou a atualização")
+    }
+
     private val pendingPayload = StringBuilder()
 
     private fun handleRawBleData(s: String) {
+        if (s.startsWith("OTA=")) {
+            handleOtaNotification(s.trim())
+            return
+        }
         when {
             s.startsWith("D=") -> {
                 val prev = pendingPayload.toString()
@@ -199,12 +235,34 @@ class BLEManager private constructor(private val context: Context) {
             }
         }
 
+        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+            Log.d(TAG, "onMtuChanged mtu=$mtu status=$status")
+            handler.post {
+                if (status == BluetoothGatt.GATT_SUCCESS) negotiatedMtu = mtu
+                if (otaState == OtaState.MTU) {
+                    handler.removeCallbacks(otaMtuTimeoutRunnable)
+                    beginOtaTransfer()
+                }
+            }
+        }
+
         override fun onCharacteristicWrite(
             gatt: BluetoothGatt?,
             characteristic: BluetoothGattCharacteristic?,
             status: Int
         ) {
             Log.d(TAG, "onCharacteristicWrite status=$status uuid=${characteristic?.uuid}")
+            if (characteristic?.uuid == FILTERTRACK_OTA_CHAR_UUID) {
+                // OTA chunk acknowledged by the stack — send the next one now
+                // instead of waiting for the fallback timer.
+                handler.post {
+                    if (otaState == OtaState.TRANSFER) {
+                        handler.removeCallbacks(otaPumpRunnable)
+                        pumpOta()
+                    }
+                }
+                return
+            }
             handler.post {
                 if (!waitingForWriteCallback) {
                     Log.d(TAG, "onCharacteristicWrite with no pending callback; ignoring")
@@ -253,6 +311,10 @@ class BLEManager private constructor(private val context: Context) {
         }
         bluetoothGatt = null
         writableChar = null
+        otaChar = null
+        handler.post {
+            if (otaState != OtaState.IDLE) failOta("Conexão perdida durante a atualização")
+        }
         handler.post {
             handler.removeCallbacks(writeTimeoutRunnable)
             writeQueue.clear()
@@ -268,6 +330,9 @@ class BLEManager private constructor(private val context: Context) {
         gatt ?: return
         val target = gatt.getService(FILTERTRACK_SERVICE_UUID)
             ?.getCharacteristic(FILTERTRACK_CHAR_UUID)
+
+        otaChar = gatt.getService(FILTERTRACK_SERVICE_UUID)
+            ?.getCharacteristic(FILTERTRACK_OTA_CHAR_UUID)
 
         if (target != null) {
             val props = target.properties
@@ -506,6 +571,164 @@ class BLEManager private constructor(private val context: Context) {
                 handler.post { drainWriteQueue() }
             }
         }
+    }
+
+    /** Starts a BLE OTA firmware update with the raw contents of the .bin file. */
+    fun startFirmwareUpdate(firmware: ByteArray) {
+        handler.post {
+            if (bluetoothGatt == null || writableChar == null) {
+                otaListener?.onOtaStatus("error", "Nenhum sensor conectado")
+                return@post
+            }
+            if (otaChar == null) {
+                otaListener?.onOtaStatus("error", "Firmware do sensor não suporta OTA (atualize por cabo)")
+                return@post
+            }
+            if (otaState != OtaState.IDLE) {
+                otaListener?.onOtaStatus("error", "Atualização já em andamento")
+                return@post
+            }
+            if (firmware.isEmpty()) {
+                otaListener?.onOtaStatus("error", "Arquivo de firmware vazio")
+                return@post
+            }
+            otaData = firmware
+            otaOffset = 0
+            otaLastReported = 0
+            otaState = OtaState.MTU
+            otaListener?.onOtaStatus("starting", "Preparando conexão...")
+            requestOtaMtu()
+        }
+    }
+
+    fun cancelFirmwareUpdate() {
+        handler.post {
+            if (otaState == OtaState.IDLE) return@post
+            sendCommand("OTA:ABORT")
+            failOta("Atualização cancelada")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestOtaMtu() {
+        val gatt = bluetoothGatt ?: return failOta("Conexão perdida")
+        val requested = try { gatt.requestMtu(517) } catch (_: Throwable) { false }
+        if (requested) {
+            handler.postDelayed(otaMtuTimeoutRunnable, 3000L)
+        } else {
+            beginOtaTransfer()
+        }
+    }
+
+    // Runs on handler thread after MTU negotiation (or its timeout).
+    private fun beginOtaTransfer() {
+        val data = otaData ?: return
+        otaChunkSize = (negotiatedMtu - 3).coerceIn(20, 509)
+        otaState = OtaState.WAIT_READY
+        if (!sendCommand("OTA:BEGIN:${data.size}")) {
+            failOta("Falha ao enviar comando de início")
+            return
+        }
+        handler.postDelayed(otaReadyTimeoutRunnable, OTA_READY_TIMEOUT_MS)
+    }
+
+    // Runs on handler thread; "OTA=..." notifications from the device.
+    private fun handleOtaNotification(msg: String) {
+        Log.d(TAG, "OTA notification: $msg (state=$otaState)")
+        when {
+            msg == "OTA=READY" -> if (otaState == OtaState.WAIT_READY) {
+                handler.removeCallbacks(otaReadyTimeoutRunnable)
+                otaState = OtaState.TRANSFER
+                otaListener?.onOtaStatus("transferring", "Enviando firmware...")
+                pumpOta()
+            }
+            msg == "OTA=OK" -> {
+                clearOtaState()
+                otaListener?.onOtaStatus("success", "Atualização concluída. O sensor vai reiniciar.")
+            }
+            msg == "OTA=ABORTED" -> if (otaState != OtaState.IDLE) {
+                failOta("Atualização interrompida pelo sensor")
+            }
+            msg.startsWith("OTA=ERRO") -> if (otaState != OtaState.IDLE) {
+                val reason = msg.substringAfter("OTA=ERRO").trim(',', ' ')
+                failOta("Falha no sensor" + if (reason.isNotEmpty()) " ($reason)" else "")
+            }
+            // "OTA=PROG,<pct>" — device-side progress; the app tracks bytes sent.
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun pumpOta() {
+        if (otaState != OtaState.TRANSFER) return
+        val gatt = bluetoothGatt ?: return failOta("Conexão perdida")
+        val ch = otaChar ?: return failOta("Conexão perdida")
+        val data = otaData ?: return failOta("Dados de firmware indisponíveis")
+
+        if (otaOffset >= data.size) {
+            otaState = OtaState.WAIT_RESULT
+            otaListener?.onOtaProgress(data.size, data.size)
+            otaListener?.onOtaStatus("verifying", "Verificando imagem no sensor...")
+            handler.postDelayed(otaResultTimeoutRunnable, OTA_RESULT_TIMEOUT_MS)
+            return
+        }
+
+        val end = minOf(otaOffset + otaChunkSize, data.size)
+        val chunk = data.copyOfRange(otaOffset, end)
+        val ok: Boolean = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeCharacteristic(
+                    ch, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                ) == BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                run {
+                    ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                    ch.value = chunk
+                    gatt.writeCharacteristic(ch)
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "OTA writeCharacteristic threw", t)
+            false
+        }
+
+        if (ok) {
+            otaOffset = end
+            if (otaOffset - otaLastReported >= OTA_PROGRESS_STEP_BYTES || otaOffset >= data.size) {
+                otaLastReported = otaOffset
+                otaListener?.onOtaProgress(otaOffset, data.size)
+            }
+            // onCharacteristicWrite normally fires and pumps sooner; this is
+            // only the fallback for stacks that stay silent on WRITE_NO_RESPONSE.
+            handler.postDelayed(otaPumpRunnable, OTA_WRITE_FALLBACK_MS)
+        } else {
+            // Stack busy — retry the same chunk shortly.
+            handler.postDelayed(otaPumpRunnable, 25L)
+        }
+    }
+
+    // Runs on handler thread.
+    private fun failOta(message: String) {
+        if (otaState == OtaState.IDLE) return
+        Log.w(TAG, "OTA failed: $message")
+        clearOtaState()
+        otaListener?.onOtaStatus("error", message)
+    }
+
+    private fun clearOtaState() {
+        otaState = OtaState.IDLE
+        otaData = null
+        otaOffset = 0
+        otaLastReported = 0
+        handler.removeCallbacks(otaPumpRunnable)
+        handler.removeCallbacks(otaMtuTimeoutRunnable)
+        handler.removeCallbacks(otaReadyTimeoutRunnable)
+        handler.removeCallbacks(otaResultTimeoutRunnable)
+    }
+
+    interface OtaListener {
+        fun onOtaProgress(sent: Int, total: Int)
+        fun onOtaStatus(state: String, message: String)
     }
 
     interface BLEListener {

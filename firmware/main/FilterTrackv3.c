@@ -6,6 +6,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/ringbuf.h"
 #include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "esp_timer.h"
@@ -14,6 +15,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
+#include "esp_ota_ops.h"
+#include "esp_app_desc.h"
 
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"
@@ -72,11 +75,25 @@ static volatile bool sensor_error = false;
 #define TAG                 "FilterTrack"
 #define SERVICE_UUID        0x00FF
 #define CHARACTERISTIC_UUID 0xFF01
+#define OTA_CHARACTERISTIC_UUID 0xFF02
 #define BLE_NOTIFY_PAYLOAD_MAX 20
+
+// ─── OTA (atualização de firmware via BLE) ────────────────────────────────
+// O app escreve "OTA:BEGIN:<bytes>" na characteristic de comando (0xFF01) e em
+// seguida envia o .bin em chunks via write-no-response na characteristic 0xFF02.
+// O firmware grava na partição OTA inativa e troca o boot no fim ("OTA=OK").
+#define OTA_RINGBUF_SIZE        (16 * 1024)
+#define OTA_RECV_TIMEOUT_US     30000000    // 30 s sem chunk = transferência morta
 
 static uint16_t gatts_if_global  = 0;
 static uint16_t conn_id_global   = 0;
 static uint16_t char_handle      = 0;
+static uint16_t service_handle_global = 0;
+static uint16_t ota_char_handle  = 0;
+static volatile bool ota_in_progress = false;
+static volatile bool ota_abort_request = false;
+static uint32_t ota_expected_size = 0;
+static RingbufHandle_t ota_ringbuf = NULL;
 static bool     device_connected = false;
 static bool     adv_config_done  = false;
 static volatile bool low_power_mode = false;
@@ -608,9 +625,165 @@ static void tratar_comando_bluetooth(int comando)
         }
         break;
 
+    case 3: {
+        char ver_msg[48];
+        snprintf(ver_msg, sizeof(ver_msg), "VER=%s",
+                 esp_app_get_description()->version);
+        enviar_notificacao_ble(ver_msg);
+        break;
+    }
+
     default:
         ESP_LOGW(TAG, "Comando bluetooth invalido: %d", comando);
         break;
+    }
+}
+
+// ─── OTA ──────────────────────────────────────────────────────────────────
+// Grava o firmware recebido pelo BLE na partição OTA inativa. Roda em task
+// própria alimentada por um ring buffer: as escritas em flash bloqueiam por
+// vários ms e não podem acontecer dentro do callback do stack Bluetooth.
+static void ota_task(void *arg)
+{
+    const esp_partition_t *update_part = esp_ota_get_next_update_partition(NULL);
+    esp_ota_handle_t handle = 0;
+    uint32_t received = 0;
+    int last_pct = 0;
+
+    if (update_part == NULL || ota_expected_size == 0 ||
+        ota_expected_size > update_part->size) {
+        ESP_LOGE(TAG, "OTA: particao invalida ou tamanho excede o slot");
+        enviar_notificacao_ble("OTA=ERRO,part");
+        goto cleanup;
+    }
+
+    // Erase incremental durante as escritas: apagar o slot inteiro de uma vez
+    // travaria a task por segundos logo no começo.
+    esp_err_t err = esp_ota_begin(update_part, OTA_WITH_SEQUENTIAL_WRITES, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: esp_ota_begin falhou: %s", esp_err_to_name(err));
+        enviar_notificacao_ble("OTA=ERRO,begin");
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "OTA iniciado: %lu bytes para %s",
+             (unsigned long)ota_expected_size, update_part->label);
+    enviar_notificacao_ble("OTA=READY");
+
+    int64_t last_data_us = esp_timer_get_time();
+    while (received < ota_expected_size) {
+        if (ota_abort_request || !device_connected) {
+            esp_ota_abort(handle);
+            ESP_LOGW(TAG, "OTA abortado (%s)",
+                     ota_abort_request ? "pedido do app" : "desconexao");
+            enviar_notificacao_ble("OTA=ABORTED");
+            goto cleanup;
+        }
+
+        size_t len = 0;
+        uint8_t *chunk = (uint8_t *)xRingbufferReceiveUpTo(
+            ota_ringbuf, &len, pdMS_TO_TICKS(500), 4096);
+        if (chunk == NULL) {
+            if ((esp_timer_get_time() - last_data_us) > OTA_RECV_TIMEOUT_US) {
+                esp_ota_abort(handle);
+                ESP_LOGE(TAG, "OTA: timeout aguardando dados (%lu/%lu bytes)",
+                         (unsigned long)received, (unsigned long)ota_expected_size);
+                enviar_notificacao_ble("OTA=ERRO,timeout");
+                goto cleanup;
+            }
+            continue;
+        }
+        last_data_us = esp_timer_get_time();
+
+        err = esp_ota_write(handle, chunk, len);
+        vRingbufferReturnItem(ota_ringbuf, chunk);
+        if (err != ESP_OK) {
+            esp_ota_abort(handle);
+            ESP_LOGE(TAG, "OTA: esp_ota_write falhou: %s", esp_err_to_name(err));
+            enviar_notificacao_ble("OTA=ERRO,write");
+            goto cleanup;
+        }
+
+        received += len;
+        int pct = (int)((uint64_t)received * 100 / ota_expected_size);
+        if (pct >= last_pct + 10) {
+            last_pct = pct;
+            char prog[24];
+            snprintf(prog, sizeof(prog), "OTA=PROG,%d", pct);
+            enviar_notificacao_ble(prog);
+        }
+    }
+
+    err = esp_ota_end(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: imagem invalida: %s", esp_err_to_name(err));
+        enviar_notificacao_ble("OTA=ERRO,verify");
+        goto cleanup;
+    }
+
+    err = esp_ota_set_boot_partition(update_part);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: falha ao definir boot: %s", esp_err_to_name(err));
+        enviar_notificacao_ble("OTA=ERRO,boot");
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "OTA concluido (%lu bytes); reiniciando", (unsigned long)received);
+    enviar_notificacao_ble("OTA=OK");
+    vTaskDelay(pdMS_TO_TICKS(1500));    // deixa a notificação sair antes do reset
+    esp_restart();
+
+cleanup:
+    ota_in_progress = false;
+    ota_abort_request = false;
+    vTaskDelete(NULL);
+}
+
+static void ota_handle_control(const char *data)
+{
+    if (strncmp(data, "OTA:BEGIN:", 10) == 0) {
+        if (ota_in_progress) {
+            enviar_notificacao_ble("OTA=ERRO,busy");
+            return;
+        }
+
+        uint32_t size = (uint32_t)strtoul(data + 10, NULL, 10);
+        if (size == 0) {
+            enviar_notificacao_ble("OTA=ERRO,size");
+            return;
+        }
+
+        // Criado uma vez e mantido: deletar o buffer poderia correr contra um
+        // write BLE em andamento no callback do GATT.
+        if (ota_ringbuf == NULL) {
+            ota_ringbuf = xRingbufferCreate(OTA_RINGBUF_SIZE, RINGBUF_TYPE_BYTEBUF);
+            if (ota_ringbuf == NULL) {
+                enviar_notificacao_ble("OTA=ERRO,mem");
+                return;
+            }
+        }
+
+        // Descarta restos de uma tentativa anterior que falhou no meio.
+        size_t stale_len = 0;
+        void *stale;
+        while ((stale = xRingbufferReceiveUpTo(ota_ringbuf, &stale_len, 0,
+                                               OTA_RINGBUF_SIZE)) != NULL) {
+            vRingbufferReturnItem(ota_ringbuf, stale);
+        }
+
+        ota_expected_size = size;
+        ota_abort_request = false;
+        ota_in_progress = true;
+        if (xTaskCreate(ota_task, "ota", 4096, NULL, 5, NULL) != pdPASS) {
+            ota_in_progress = false;
+            enviar_notificacao_ble("OTA=ERRO,task");
+        }
+    } else if (strcmp(data, "OTA:ABORT") == 0) {
+        if (ota_in_progress) {
+            ota_abort_request = true;
+        }
+    } else {
+        ESP_LOGW(TAG, "Comando OTA desconhecido: %s", data);
     }
 }
 
@@ -680,12 +853,13 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                 .id.inst_id      = 0x00,
                 .id.uuid.len     = ESP_UUID_LEN_16,
                 .id.uuid.uuid.uuid16 = SERVICE_UUID,
-            }, 4);
+            }, 8);
         break;
     }
 
     case ESP_GATTS_CREATE_EVT:
         ESP_LOGI(TAG, "Serviço criado");
+        service_handle_global = param->create.service_handle;
         esp_ble_gatts_start_service(param->create.service_handle);
         esp_ble_gatts_add_char(param->create.service_handle,
             &(esp_bt_uuid_t){
@@ -698,8 +872,23 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         break;
 
     case ESP_GATTS_ADD_CHAR_EVT:
-        char_handle = param->add_char.attr_handle;
-        ESP_LOGI(TAG, "Characteristic criada (handle=%d)", char_handle);
+        if (param->add_char.char_uuid.uuid.uuid16 == CHARACTERISTIC_UUID) {
+            char_handle = param->add_char.attr_handle;
+            ESP_LOGI(TAG, "Characteristic criada (handle=%d)", char_handle);
+            // Characteristics são adicionadas em sequência: a de OTA só depois
+            // da de comando/notificação existir.
+            esp_ble_gatts_add_char(service_handle_global,
+                &(esp_bt_uuid_t){
+                    .len         = ESP_UUID_LEN_16,
+                    .uuid.uuid16 = OTA_CHARACTERISTIC_UUID,
+                },
+                ESP_GATT_PERM_WRITE,
+                ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_WRITE_NR,
+                NULL, NULL);
+        } else if (param->add_char.char_uuid.uuid.uuid16 == OTA_CHARACTERISTIC_UUID) {
+            ota_char_handle = param->add_char.attr_handle;
+            ESP_LOGI(TAG, "Characteristic OTA criada (handle=%d)", ota_char_handle);
+        }
         break;
 
     case ESP_GATTS_WRITE_EVT: {
@@ -715,6 +904,20 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             break;
         }
 
+        // Chunks binários de firmware chegam na characteristic OTA e vão
+        // direto para o ring buffer; a ota_task grava na flash.
+        if (param->write.handle == ota_char_handle) {
+            if (ota_in_progress && ota_ringbuf != NULL) {
+                if (xRingbufferSend(ota_ringbuf, param->write.value,
+                                    param->write.len,
+                                    pdMS_TO_TICKS(2000)) != pdTRUE) {
+                    ESP_LOGE(TAG, "OTA: ring buffer cheio; abortando");
+                    ota_abort_request = true;
+                }
+            }
+            break;
+        }
+
         char data[32] = {0};
         size_t copy_len = param->write.len;
         if (copy_len > (sizeof(data) - 1)) {
@@ -723,6 +926,11 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         memcpy(data, param->write.value, copy_len);
         data[copy_len] = '\0';
         ESP_LOGI(TAG, "Recebido do cliente: %s", data);
+
+        if (strncmp(data, "OTA:", 4) == 0) {
+            ota_handle_control(data);
+            break;
+        }
 
         char *endptr = NULL;
         long comando = strtol(data, &endptr, 10);
@@ -813,7 +1021,20 @@ void app_main(void)
     esp_ble_gap_register_callback(gap_event_handler);
     esp_ble_gatts_register_callback(gatts_event_handler);
     esp_ble_gatts_app_register(0);
-    esp_ble_gatt_set_local_mtu(128);
+    // MTU alto para o OTA: chunks de até 514 bytes por write-no-response.
+    esp_ble_gatt_set_local_mtu(517);
+
+    // Com rollback habilitado, uma imagem recém-gravada por OTA boota como
+    // "pending verify"; se não for marcada válida, o bootloader volta para a
+    // imagem anterior no próximo reset. Chegar até aqui (BLE de pé) é o nosso
+    // critério de boot saudável.
+    const esp_partition_t *running_part = esp_ota_get_running_partition();
+    esp_ota_img_states_t img_state;
+    if (esp_ota_get_state_partition(running_part, &img_state) == ESP_OK &&
+        img_state == ESP_OTA_IMG_PENDING_VERIFY) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        ESP_LOGI(TAG, "Imagem OTA validada (rollback cancelado)");
+    }
 
     accel_check_idle_pin_levels();
 
@@ -835,6 +1056,14 @@ void app_main(void)
 
         // ── Atualiza LEDs de status ──────────────────────────────────────
         atualizar_leds_status(!low_power_mode);
+
+        if (ota_in_progress) {
+            // Pausa leituras e notificações de sensor para não competir com a
+            // transferência de firmware pelo mesmo link BLE.
+            ultimo_envio_us = agora;
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
 
         if (low_power_mode) {
             // Reduz leitura do sensor para economizar energia, mantendo BLE ativo.

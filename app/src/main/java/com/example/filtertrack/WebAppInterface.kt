@@ -13,6 +13,8 @@ class WebAppInterface(
         object Disconnect : Action()
         data class SendCommand(val cmd: String) : Action()
         object OpenBiDashboard : Action()
+        object UpdateFirmware : Action()
+        object CancelFirmwareUpdate : Action()
     }
 
     @JavascriptInterface
@@ -32,6 +34,12 @@ class WebAppInterface(
 
     @JavascriptInterface
     fun openBiDashboard() { onAction(Action.OpenBiDashboard) }
+
+    @JavascriptInterface
+    fun updateFirmware() { onAction(Action.UpdateFirmware) }
+
+    @JavascriptInterface
+    fun cancelFirmwareUpdate() { onAction(Action.CancelFirmwareUpdate) }
 
     @JavascriptInterface
     fun isBluetoothEnabled(): Boolean = bleManager.isBluetoothEnabled()

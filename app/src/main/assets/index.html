@@ -7,9 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<!-- Vendored locally (assets/vendor/) so the app works with no internet connection. -->
+<script src="vendor/react.production.min.js"></script>
+<script src="vendor/react-dom.production.min.js"></script>
+<script src="vendor/babel.min.js"></script>
 <style>
 :root {
   --cagece-blue: #0068B4; --cagece-blue-hover: #0058a0; --cagece-blue-active: #00477f;
@@ -550,6 +551,7 @@ const bridge = (() => {
     scanning: false, connected: false, connectionStatus: "Idle",
     deviceName: "", deviceAddress: "", devices: [],
     lastData: null, distanceSamples: [], rawLog: [], rssi: -90, errorMsg: "",
+    ota: { status: "idle", sent: 0, total: 0, message: "" },
   };
   let errorTimer = null, discardNextDistanceSample = true;
   const emit = () => listeners.forEach(fn => fn(state));
@@ -594,6 +596,16 @@ const bridge = (() => {
       emit();
     },
     onRssiUpdate(rssi) { state.rssi = Number(rssi) || state.rssi; emit(); },
+    onOtaProgress(sent, total) {
+      state.ota = { ...state.ota, status: "transferring", sent: Number(sent) || 0, total: Number(total) || 0 };
+      emit();
+    },
+    onOtaStatus(status, message) {
+      const st = String(status || "idle");
+      const done = st === "success" || st === "error" || st === "idle";
+      state.ota = { ...state.ota, status: st, message: String(message || ""), ...(done ? { sent: 0, total: 0 } : {}) };
+      emit();
+    },
     onError(message) {
       if (/bluetooth desligado|ative o bluetooth|scanner ble indispon/i.test(String(message || ""))) {
         state.scanning = false;
@@ -626,6 +638,8 @@ const bridge = (() => {
       return callAndroid("sendCommand", command);
     },
     isBluetoothEnabled: () => { const r = callAndroid("isBluetoothEnabled"); return r !== false; },
+    updateFirmware: () => callAndroid("updateFirmware"),
+    cancelFirmwareUpdate: () => callAndroid("cancelFirmwareUpdate"),
   };
 })();
 
@@ -634,6 +648,7 @@ function useBLE() {
     scanning: false, connected: false, connectionStatus: "Idle",
     deviceName: "", deviceAddress: "", devices: [],
     lastData: null, distanceSamples: [], rawLog: [], rssi: -90, errorMsg: "",
+    ota: { status: "idle", sent: 0, total: 0, message: "" },
   });
   useEffect(() => bridge.subscribe(state => setSnap({ ...state })), []);
   return { ...snap, ...bridge };
@@ -1473,6 +1488,18 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
     setConfirmAction(null);
     action?.onConfirm?.();
   };
+  const ota = ble?.ota || { status: "idle", sent: 0, total: 0, message: "" };
+  const otaBusy = ["starting", "transferring", "verifying"].includes(ota.status);
+  const otaPct = ota.total > 0 ? Math.round((ota.sent / ota.total) * 100) : 0;
+  const startOta = () => {
+    setConfirmAction({
+      title: "Atualizar firmware",
+      message: "Selecione o arquivo .bin gerado pelo build (FilterTrackv3.bin). A transferência leva alguns minutos; mantenha o app aberto e o sensor ligado. Ao final o sensor reinicia sozinho com o novo firmware.",
+      confirmLabel: "Selecionar arquivo",
+      tone: "secondary",
+      onConfirm: () => ble?.updateFirmware?.(),
+    });
+  };
   return (
     <>
     <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 16, background: T.surface1 }}>
@@ -1495,6 +1522,41 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
         <div style={{ fontSize: 12, color: T.inkSubtle, marginTop: 10 }}>
           {commandStatus || (ble?.connected ? "Sensor conectado." : "Nenhum sensor conectado.")}
         </div>
+      </Tile>
+
+      <Tile padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Firmware</div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
+          Atualização OTA via Bluetooth (arquivo .bin do build).
+        </div>
+        {otaBusy ? (
+          <div>
+            <div style={{ height: 8, background: T.surface1, overflow: "hidden", marginBottom: 8 }}>
+              <div style={{ height: "100%", width: `${otaPct}%`, background: T.blue, transition: "width .3s" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 13, color: T.inkSubtle }}>
+                {ota.status === "transferring" && ota.total > 0
+                  ? `Enviando… ${otaPct}% (${Math.round(ota.sent / 1024)} / ${Math.round(ota.total / 1024)} KB)`
+                  : (ota.message || "Preparando…")}
+              </span>
+              <button onClick={() => ble?.cancelFirmwareUpdate?.()} style={{ fontSize: 13, color: T.red || "#da1e28", flexShrink: 0, padding: "4px 6px" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Btn kind="secondary" full disabled={!ble?.connected} onClick={startOta}>
+              Atualizar firmware (.bin)
+            </Btn>
+            {ota.message ? (
+              <div style={{ fontSize: 12, marginTop: 10, color: ota.status === "error" ? (T.red || "#da1e28") : T.inkSubtle }}>
+                {ota.message}
+              </div>
+            ) : null}
+          </>
+        )}
       </Tile>
 
       <Tile padding={16}>
@@ -1529,7 +1591,7 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
         <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 14 }}>Sobre</div>
         {[
           { k: "Versão", v: "2.0.0" },
-          { k: "Serviço BLE", v: "0x00FF / 0xFF01", mono: true },
+          { k: "Serviço BLE", v: "0x00FF / 0xFF01+0xFF02", mono: true },
           { k: "Schema", v: "v3", mono: true },
         ].map(({ k, v, mono }, i, arr) => (
           <div key={k} style={{

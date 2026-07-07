@@ -40,6 +40,19 @@ Set-Location firmware
 
 Output: `firmware/build/FilterTrackv3.bin` (851 KB, 19% of 1 MB partition).
 
+### ESP32-C6 target
+
+The C6 build uses its own sdkconfig and build directory (the default
+`sdkconfig`/`build` above targets the C3 — don't mix them):
+
+```powershell
+& $IDF_PYTHON "$IDF_PATH\tools\idf.py" -B build-esp32c6 -DSDKCONFIG=sdkconfig_esp32c6 build
+```
+
+Output: `firmware/build-esp32c6/FilterTrackv3.bin`. The C6 board has 4 MB flash
+and uses the OTA partition table `firmware/partitions_ota.csv` (two 1.875 MB app
+slots + `otadata`), so the flash command differs — see below.
+
 ### Stale build cache
 
 If CMake errors mention the wrong IDF version (e.g. `esp-idf-v4.3.1`), delete the
@@ -64,6 +77,32 @@ python -m esptool --chip esp32c3 -p COM13 -b 460800 `
 ```
 
 Replace `COM13` with the actual port if it differs.
+
+### ESP32-C6 (OTA layout)
+
+From `firmware/` (C6 board usually shows up on COM3):
+
+```powershell
+python -m esptool --chip esp32c6 -p COM3 -b 460800 `
+  --before default-reset --after hard-reset write-flash `
+  --flash-mode dio --flash-size 4MB --flash-freq 80m `
+  0x0     build-esp32c6\bootloader\bootloader.bin `
+  0x8000  build-esp32c6\partition_table\partition-table.bin `
+  0xd000  build-esp32c6\ota_data_initial.bin `
+  0x10000 build-esp32c6\FilterTrackv3.bin
+```
+
+`ota_data_initial.bin` resets the OTA selector so the bootloader boots `ota_0`.
+Include it whenever flashing by cable; omitting it after an OTA update would
+keep booting whichever slot the last OTA selected.
+
+Cable flashing is only needed for the first deployment of this layout (the
+partition table changed) or for recovery. Subsequent updates can go over BLE
+from the Android app (Settings → Firmware → "Atualizar firmware (.bin)") using
+`build-esp32c6\FilterTrackv3.bin` — copy it to the phone and pick it in the file
+dialog. See [ble-firmware-contract.md](ble-firmware-contract.md) "OTA Firmware
+Update" for the protocol. Bump `PROJECT_VER` in `firmware/CMakeLists.txt` when
+releasing so the update can be confirmed via BLE command `3` (`VER=...`).
 
 ### Flash address map
 
