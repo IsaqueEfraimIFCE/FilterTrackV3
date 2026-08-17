@@ -104,6 +104,15 @@ On inversion:
 3. Window timing resets.
 4. Accumulation resumes after the countdown.
 
+Minimal-mode exceptions (see [android-app.md](android-app.md) "Minimal Mode"):
+
+- Readings below the minimum display velocity append `0.00` points instead of
+  being dropped, and passing through zero does not count as an inversion.
+- During a firmware-detected wash (`WL=WSTART` … `WL=EVT`) the chart restarts
+  at the wash start and accumulates points every 2 s with no inversion resets
+  and no threshold cut, while the velocity/vazão tiles hold the latest
+  above-threshold reading.
+
 See [../info/monitor-chart-changes.md](../info/monitor-chart-changes.md) for the
 source notes from 2026-05-07.
 

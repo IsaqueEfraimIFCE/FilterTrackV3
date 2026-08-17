@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="cagece_blue">#0068B4</color>
+    <color name="cagece_blue_dark">#00477F</color>
+    <color name="cagece_teal">#009CA6</color>
+    <color name="launcher_background">#08111F</color>
     <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FF6200EE</color>
     <color name="purple_700">#FF3700B3</color>

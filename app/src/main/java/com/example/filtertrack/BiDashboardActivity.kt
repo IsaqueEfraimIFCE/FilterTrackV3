@@ -21,7 +21,9 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 
 class BiDashboardActivity : AppCompatActivity() {
@@ -36,13 +38,24 @@ class BiDashboardActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        webView = WebView(this)
-        webView.layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        )
-        setContentView(webView)
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(android.graphics.Color.WHITE)
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        webView = WebView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        root.addView(webView)
+        setContentView(root)
+        applyFilterTrackSystemBars(root)
         setupWebView()
+        installWebViewBackHandler()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -76,6 +89,9 @@ class BiDashboardActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (!handledLoadFailure) {
                     injectUserLogin()
+                    if (intent.getBooleanExtra(MainActivity.EXTRA_INITIAL_GUIDE, false)) {
+                        injectGuideOverlay()
+                    }
                 }
             }
 
@@ -225,6 +241,35 @@ class BiDashboardActivity : AppCompatActivity() {
         BuildConfig.FILTERTRACK_BI_ADMIN_KEY.takeIf { it.isNotBlank() }
             ?: BuildConfig.FILTERTRACK_BI_USER_KEY.takeIf { it.isNotBlank() }
 
+    private fun injectGuideOverlay() {
+        val js = """
+            (function() {
+              if (document.getElementById('filtertrack-initial-guide')) return;
+              var overlay = document.createElement('div');
+              overlay.id = 'filtertrack-initial-guide';
+              overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:flex-end;padding:16px;font-family:system-ui,sans-serif;pointer-events:none';
+              overlay.innerHTML = '<div id="filtertrack-bi-spotlight" style="position:fixed;border:3px solid #0068b4;box-shadow:0 0 0 9999px rgba(8,12,20,.58),0 0 0 5px rgba(0,104,180,.25);pointer-events:none"></div><div style="width:100%;max-width:560px;margin:0 auto;background:#fff;color:#161616;padding:20px;border-top:4px solid #0068b4;box-shadow:0 12px 36px rgba(0,0,0,.3);pointer-events:auto">' +
+                '<div style="font-size:12px;color:#0068b4;font-weight:700;letter-spacing:.08em;text-transform:uppercase">Guia · 13 de 13</div>' +
+                '<h2 style="margin:8px 0;font-size:22px">Painel BI</h2>' +
+                '<p style="margin:0 0 12px;line-height:1.45">Aqui ficam os dados sincronizados de toda a operação: indicadores, filtros, sessões e propostas. Use os filtros de período e estação para analisar tendências e exporte CSV ou JSON quando precisar compartilhar os resultados.</p>' +
+                '<p style="margin:0 0 12px;color:#525252;font-size:14px">O BI precisa de internet. Os dados de campo continuam sendo coletados localmente quando a rede não está disponível.</p>' +
+                '<label style="display:flex;align-items:center;gap:10px;margin:0 0 16px;font-size:14px"><input id="showGuideNextTime" type="checkbox" style="width:20px;height:20px"> Mostrar tutorial novamente na próxima abertura</label>' +
+                '<button onclick="window.FilterTrackAndroid.completeInitialGuide(!!document.getElementById(&quot;showGuideNextTime&quot;).checked)" style="width:100%;min-height:48px;border:0;background:#0068b4;color:#fff;font-size:16px">Concluir guia</button>' +
+              '</div>';
+              document.body.appendChild(overlay);
+              var target = document.querySelector('nav') || document.querySelector('header') || document.querySelector('main');
+              var spot = document.getElementById('filtertrack-bi-spotlight');
+              if (target && spot) {
+                var r = target.getBoundingClientRect();
+                spot.style.left = Math.max(4, r.left - 5) + 'px';
+                spot.style.top = Math.max(4, r.top - 5) + 'px';
+                spot.style.width = Math.max(40, r.width + 10) + 'px';
+                spot.style.height = Math.max(40, r.height + 10) + 'px';
+              }
+            })();
+        """.trimIndent()
+        webView.postDelayed({ webView.evaluateJavascript(js, null) }, 700)
+    }
     private fun toJsString(value: String): String =
         "\"" + value
             .replace("\\", "\\\\")
@@ -234,6 +279,24 @@ class BiDashboardActivity : AppCompatActivity() {
 
     private inner class BiDownloadBridge {
         @JavascriptInterface
+        fun completeInitialGuide(showNextTime: Boolean) {
+            runOnUiThread {
+                getSharedPreferences(MainActivity.GUIDE_PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(MainActivity.GUIDE_COMPLETE, true)
+                    .putBoolean(MainActivity.GUIDE_SHOW_ON_STARTUP, showNextTime)
+                    .apply()
+                val home = Intent(this@BiDashboardActivity, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    putExtra("reset_to_initial_screen", true)
+                    putExtra("suppress_initial_guide_once", true)
+                }
+                startActivity(home)
+                finish()
+            }
+        }
+
+        @JavascriptInterface
         fun downloadBiFile(url: String?, filename: String?) {
             runOnUiThread {
                 downloadFromBi(url, filename, webView.settings.userAgentString, null, null)
@@ -241,15 +304,10 @@ class BiDashboardActivity : AppCompatActivity() {
         }
     }
 
-    override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        try {
-            webView.destroy()
-        } catch (_: Throwable) {
-        }
-    }
-}
+    private fun installWebViewBackHandler() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) webView.goBack() else finish()
+            }
+        })
+    }}

@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/appRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#080c14">
+    android:background="#FFFFFF">
 
     <WebView
         android:id="@+id/webView"
@@ -10,17 +12,31 @@
         android:layout_height="match_parent" />
 
     <ImageButton
+        android:id="@+id/csvAnalysisButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="132dp"
+        android:background="@drawable/bg_data_button"
+        android:contentDescription="@string/open_csv_analysis"
+        android:elevation="8dp"
+        android:padding="12dp"
+        android:src="@drawable/ic_csv_analysis_24"
+        app:tint="#FFFFFFFF" />
+
+    <ImageButton
         android:id="@+id/biButton"
         android:layout_width="48dp"
         android:layout_height="48dp"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="16dp"
-        android:layout_marginBottom="20dp"
+        android:layout_marginBottom="76dp"
         android:background="@drawable/bg_data_button"
         android:contentDescription="@string/open_bi_dashboard"
         android:elevation="8dp"
         android:padding="12dp"
         android:src="@drawable/ic_data_usage_24"
-        android:tint="#FFFFFFFF" />
+        app:tint="#FFFFFFFF" />
 
 </FrameLayout>

@@ -50,8 +50,10 @@ The C6 build uses its own sdkconfig and build directory (the default
 ```
 
 Output: `firmware/build-esp32c6/FilterTrackv3.bin`. The C6 board has 4 MB flash
-and uses the OTA partition table `firmware/partitions_ota.csv` (two 1.875 MB app
-slots + `otadata`), so the flash command differs — see below.
+and uses the OTA partition table `firmware/partitions_ota.csv` (two 1344 KB app
+slots + `otadata` + a 1344 KB raw `storage` partition reserved for sensor data
+— see [ble-firmware-contract.md](ble-firmware-contract.md) "Sensor Data Storage
+Partition"), so the flash command differs — see below.
 
 ### Stale build cache
 
@@ -96,8 +98,10 @@ python -m esptool --chip esp32c6 -p COM3 -b 460800 `
 Include it whenever flashing by cable; omitting it after an OTA update would
 keep booting whichever slot the last OTA selected.
 
-Cable flashing is only needed for the first deployment of this layout (the
-partition table changed) or for recovery. Subsequent updates can go over BLE
+Cable flashing is only needed for the first deployment of a new partition
+layout (OTA cannot rewrite the partition table — the 2026-07 change that
+shrank the OTA slots and added the `storage` partition required a cable
+flash) or for recovery. Subsequent updates can go over BLE
 from the Android app (Settings → Firmware → "Atualizar firmware (.bin)") using
 `build-esp32c6\FilterTrackv3.bin` — copy it to the phone and pick it in the file
 dialog. See [ble-firmware-contract.md](ble-firmware-contract.md) "OTA Firmware

@@ -5,8 +5,8 @@ Use this checklist when preparing FilterTrack for Google Play internal testing.
 ## Current App Identity
 
 - Application id: `com.filtertrack`
-- Version code: `2`
-- Version name: `1.0`
+- Version code: `5`
+- Version name: `1.2`
 - Current signed AAB path: `app/build/outputs/bundle/release/app-release.aab`
 - Release artifact task: `.\gradlew.bat :app:bundleRelease`
 - Debug validation task: `.\gradlew.bat :app:assembleDebug`
@@ -75,13 +75,17 @@ reset in Play Console.
 
 ## Versioning
 
-Play Console rejected `versionCode = 1` because it had already been uploaded.
-The current release uses:
+Play Console rejected `versionCode = 1` and later `versionCode = 4` because
+they had already been uploaded.
+The current release (AAB built 2026-07-15, ready for upload) uses:
 
 ```text
-versionCode = 2
-versionName = 1.0
+versionCode = 5
+versionName = 1.2
 ```
+
+The previously uploaded test build was `versionCode = 2` / `versionName = 1.0`;
+code 3 was built locally, and Play Console reported code 4 as already used.
 
 Increment `versionCode` for every replacement AAB uploaded to Play Console,
 including internal testing builds.
@@ -97,6 +101,7 @@ including internal testing builds.
 - The app requires Bluetooth LE and uses BLE scan/connect permissions.
 - Privacy policy URL for Play Console:
   `https://filtertrack-api.fly.dev/privacy`.
+- Play listing icon: `release/filtertrack-play-icon.png` (512 x 512 PNG).
 
 ## Play Console Tasks
 

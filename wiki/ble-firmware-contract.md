@@ -134,6 +134,9 @@ Android sends single-character command strings through BLE writes:
 1 = enable low-power mode
 2 = disable low-power mode / normal reading
 3 = report firmware version (notifies "VER=<PROJECT_VER>")
+4 = run storage partition self-test (destructive; notifies "ST=OK,<bytes>" or "ST=ERRO,<stage>")
+5 = enable sand/fixed-filter mode (persisted in NVS; notifies "SAND=1")
+6 = disable sand/fixed-filter mode (notifies "SAND=0"; aborts an open wash without records)
 ```
 
 App behavior around commands:
@@ -151,12 +154,164 @@ Firmware behavior around commands:
   error state, and keeps BLE active.
 - `2` disables low-power mode and powers the ultrasonic sensor back on.
 - `3` notifies `VER=<version>` (from `PROJECT_VER` in `firmware/CMakeLists.txt`).
+- `4` runs the storage-partition self-test in a background task (see "Sensor
+  Data Storage Partition" below). Sensor readings pause while it runs. It
+  **erases the whole `storage` partition**, so don't send it once real sensor
+  data lives there.
+- `5`/`6` toggle sand/fixed-filter mode (the wash-detection state machine
+  below). The state persists in NVS (`ftstore/sandmode`) and survives
+  reboots; every write replies with the current state (`SAND=1`/`SAND=0`),
+  even when nothing changed. `6` aborts an open wash without writing records.
+  The app's minimal mode enforces sand mode: it sends `5` shortly after
+  connect and re-sends it whenever a `SAND=0` notification arrives.
+
+### Sand-mode wash detection (firmware >= 1.6.0, generic + configurable)
+
+A wash is a **transient** that can move the level in either direction
+(ascending or descending filters) and is influenced by other factors, so
+every threshold is a runtime-adjustable parameter (see `CFG:` below):
+
+- **Start**: |distance − baseline| > `start_mm` sustained for `start_s`
+  (either direction), or a stable window already that far away → opens a
+  wash, notifies `WL=WSTART`.
+- **Events**: inside the wash, each max↔min excursion of the level with
+  amplitude ≥ `ev_mm` is an excursion; consecutive excursions whose
+  throughput (mm/min) is within ±`ev_tol`% of the group mean are aggregated
+  into one **event**. When a group closes it is written to flash and
+  `WL=WEVT,<min_mm>,<max_mm>,<rate_mm_min>,<n_excursions>` is notified.
+- **End**: the wash closes when the level has been continuously stable
+  (windows of `stable_s` with range ≤ `stable_mm`, medians close) for
+  `end_s`, after at least `min_s`; forced close at `max_s`. Summary record
+  written; `WL=EVT,<before>,<after>,<n_events>` notified; baseline := after;
+  re-arms after `cool_s`.
+- Outside a wash, stable windows only track baseline drift > `drift_mm`.
+- Command `6` (sand mode off) aborts an open wash without records.
+
+### Wash-log record v2 (`WASHLOG_VERSION 2`, 20 bytes/slot)
+
+`WL=R,<boot>,<uptime_s>,<type>,<a_mm>,<b_mm>,<count>,<aux>`
+
+- `type 0` (wash summary): a=before, b=after, count=nº of events,
+  aux=duration in s.
+- `type 1` (aggregated event): a=min level, b=max level, count=nº of
+  excursions aggregated, aux=mean throughput in mm/min.
+
+Version bump reformats the partition (old records discarded on first boot).
+
+### Wash-log transfer (`LOG:` commands)
+
+The app pulls and clears the persisted wash log over `0xFF01`:
+
+```text
+LOG:COUNT     -> WL=CNT,<count>,<boot_count>,<uptime_s>
+LOG:READ      -> dump task: WL=CNT,... then one WL=R,... per record, then WL=END
+LOG:ACK:<n>   -> erases the log if <n> == current count (WL=CLR);
+                 WL=ERR,count if a new record arrived after the dump (re-read first)
+LOG:TEST      -> appends one synthetic event + wash record (WL=ADD,<count>)
+```
+
+Errors notify `WL=ERR,<reason>` (`busy`, `task`, `count`, `write`, `erase`).
+`LOG:READ`/`LOG:ACK` are refused while a dump/erase task or the storage
+self-test is running (`WL=ERR,busy`).
+
+Android minimal mode runs this silently on connect: `LOG:COUNT` ~4 s after
+connect, then `LOG:READ`, stores the records in local storage
+(`filtertrack.washLog.v1`), and acknowledges with `LOG:ACK:<n>` so the
+sensor's log is cleared once safely copied.
+
+### Detection configuration (`CFG:` commands, firmware >= 1.6.0)
+
+```text
+CFG:GET               -> one notify per item:
+                         CFG=<key>,<val>,<default>,<min>,<max>,<description>
+                         ... then CFG=END
+CFG:SET:<key>:<value> -> CFG=OK,<key>,<value> | CFG=ERR,faixa,... | CFG=ERR,chave
+CFG:RESET             -> all keys back to defaults, CFG=OK,reset,0
+```
+
+Keys (persisted in NVS): `start_mm, start_s, stable_mm, stable_s, end_s,
+min_s, max_s, cool_s, ev_mm, ev_tol, drift_mm`. The app's Ajustes tab has a
+generic "Detecção de lavagem" card that renders whatever `CFG:GET` returns,
+so new firmware keys appear automatically.
+
+App behavior: `WL=WSTART` finalizes the current minimal-mode session
+("wash_started") and shows a "Lavagem em andamento" banner with a live count
+of `WL=WEVT` events; `WL=EVT` clears the banner and starts the next session.
+The banner self-clears after 35 min or on disconnect in case `WL=EVT` is
+lost. During the wash the minimal-mode chart restarts at `WL=WSTART` and
+accumulates points every 2 s (no inversion resets, no display-threshold cut)
+so all wash events are visible, while the velocity/vazão tiles stay frozen
+at the latest above-threshold reading — see
+[android-app.md](android-app.md) "Minimal Mode" for the full display rules.
+
+### Sensor tilt calibration (`CAL:` commands, firmware >= 1.4.0)
+
+If the sensor is mounted with a tilt, the ultrasonic distance reads longer
+than the true vertical distance (`measured = real / cos(θ)`). The app sends
+the known real distance while the water level is steady (filter not being
+washed); the firmware computes `factor = real / measured` (= `cos θ`), stores
+it in NVS (`calppm`, factor × 10⁶) and multiplies **every** distance reading
+by it from then on — including the sand-mode wash detection.
+
+```text
+CAL:SET:<real_cm>  -> applies factor = real_cm / last raw reading
+                      replies CAL=OK,<factor 4dp>,<angle_deg 1dp>
+                      or CAL=ERR,valor | CAL=ERR,semleitura | CAL=ERR,faixa
+CAL:GET            -> replies CAL=<factor>,<angle_deg>
+CAL:CLEAR          -> resets factor to 1.0; replies CAL=OK,1.0000,0.0
+```
+
+Rules:
+
+- `CAL:SET` uses the last valid **raw** reading (kept internally), which must
+  be less than 5 s old (`CAL=ERR,semleitura` otherwise), so recalibrating with
+  a factor already active still works.
+- Accepted factor range is 0.50–1.05 (`CAL=ERR,faixa` outside it); values
+  slightly above 1.0 are clamped to 1.0 since tilt can only lengthen the path.
+- Applying a new factor rescales the persisted sand-mode baseline by
+  `new/old` and resets the stability window, so a calibration change is not
+  misread as a wash event.
+- The UI lives in the full app's Ajustes tab ("Calibração de inclinação");
+  the app sends `CAL:GET` on connect to display the current factor/angle.
+
+## Sensor Data Storage Partition
+
+The ESP32-C6 4 MB layout (`firmware/partitions_ota.csv`) reserves a raw data
+partition for sensor data logging:
+
+```text
+nvs       0x9000    16 KB
+otadata   0xd000     8 KB
+phy_init  0xf000     4 KB
+ota_0     0x10000   1344 KB (app slot A)
+ota_1     0x160000  1344 KB (app slot B)
+storage   0x2b0000  1344 KB (raw data, subtype undefined, label "storage")
+```
+
+The app binary is ~960 KB, so each 1344 KB OTA slot keeps ~28% headroom.
+`storage` is currently raw (no filesystem); access it via
+`esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
+"storage")` and `esp_partition_read/write/erase_range`.
+
+### Storage self-test
+
+`storage_selftest_task` in `FilterTrackv3.c` verifies the entire partition:
+erases it all, writes a deterministic xorshift32 pattern (per-4KB-block seed)
+across every byte, reads everything back, and compares. Serial log reports
+progress and `Storage: SELF-TEST OK — <bytes> bytes ...` at the end; over BLE
+it notifies `ST=OK,<bytes>` / `ST=ERRO,<stage>` (`part`, `mem`, `erase`,
+`write`, `read`, `verify`, `busy`, `ota`, `task`).
+
+It runs automatically once on the first boot after flashing (completion marker
+`ftstore/selftest` in NVS) and on demand via BLE command `4`. OTA transfers and
+the self-test are mutually exclusive (`OTA=ERRO,busy` / `ST=ERRO,ota`).
 
 ## OTA Firmware Update (BLE)
 
 The firmware can be updated over the air through the existing BLE connection.
-Flash layout uses two app slots (`ota_0`/`ota_1`, 1.875 MB each, see
-`firmware/partitions_ota.csv`); the transfer writes the inactive slot and swaps
+Flash layout uses two app slots (`ota_0`/`ota_1`, 1344 KB each, see
+`firmware/partitions_ota.csv` and the partition table above); the transfer
+writes the inactive slot and swaps
 the boot partition on success. Rollback is enabled
 (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`): a new image that fails to reach
 `app_main`'s BLE init is rolled back on the next reset.

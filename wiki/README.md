@@ -28,6 +28,7 @@ topic pages that match the task.
 - [android-app.md](android-app.md) - Android shell, WebView UI, BLE bridge, local sessions.
 - [android-play-internal-testing.md](android-play-internal-testing.md) - Play internal testing build and upload checklist.
 - [ble-firmware-contract.md](ble-firmware-contract.md) - firmware-facing BLE protocol.
+- [firmware-build-and-flash.md](firmware-build-and-flash.md) - ESP-IDF build and flash guide.
 - [sensor-processing-flow.md](sensor-processing-flow.md) - distance filtering, velocity, flow.
 - [sessions-data-contract.md](sessions-data-contract.md) - upload and storage contracts.
 - [backend-fastapi.md](backend-fastapi.md) - FastAPI app, models, routes, config.

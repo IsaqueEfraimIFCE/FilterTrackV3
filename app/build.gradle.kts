@@ -48,8 +48,8 @@ android {
         applicationId = "com.filtertrack"
         minSdk = 28
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0"
+        versionCode = 5
+        versionName = "1.2"
         buildConfigField("String", "FILTERTRACK_BI_ADMIN_KEY", "\"${secretProperty("FILTERTRACK_BI_ADMIN_KEY")}\"")
         buildConfigField("String", "FILTERTRACK_BI_USER_KEY", "\"${secretProperty("FILTERTRACK_BI_USER_KEY")}\"")
     }

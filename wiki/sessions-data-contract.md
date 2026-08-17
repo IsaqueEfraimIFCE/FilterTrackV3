@@ -47,6 +47,12 @@ Payload shape:
 
 The backend accepts legacy object-list samples and compact samples.
 
+Note for future work: the backend keeps unknown session keys inside the
+stored payload JSON (`normalize_payload` only strips `sampleCount`), so
+extra fields — e.g. attaching wash-log records to a session — can be added
+by the app without any backend change. A `session.washEvents` design was
+implemented and then reverted on 2026-07-09 (see [log.md](log.md)).
+
 ## Compact Sample Format
 
 Canonical sample storage:

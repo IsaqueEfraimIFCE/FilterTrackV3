@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">FilterTrack</string>
     <string name="open_bi_dashboard">Abrir dados</string>
+    <string name="open_csv_analysis">Analisador de vazão</string>
 </resources>

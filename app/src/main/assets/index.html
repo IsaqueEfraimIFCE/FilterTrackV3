@@ -57,7 +57,30 @@ const STORAGE = {
   serverUrl: "filtertrack.serverUrl.v1",
   lastSyncAt: "filtertrack.lastSyncAt.v1",
   debugMode: "filtertrack.debugMode.v1",
+  minimalMode: "filtertrack.minimalMode.v1",
+  washLog: "filtertrack.washLog.v1",
+  velocityUnit: "filtertrack.velocityUnit.v1",
+  flowUnit: "filtertrack.flowUnit.v1",
+  minVelocity: "filtertrack.minVelocity.v1",
 };
+
+/* Unidades de exibição (base interna: velocidade m/min, vazão L/min) */
+const VELOCITY_UNITS = [
+  { id: "m_min",  label: "m/min",  factor: 1,        dec: 2 },
+  { id: "cm_min", label: "cm/min", factor: 100,      dec: 1 },
+  { id: "cm_s",   label: "cm/s",   factor: 100 / 60, dec: 2 },
+  { id: "m_h",    label: "m/h",    factor: 60,       dec: 1 },
+  { id: "cm_h",   label: "cm/h",   factor: 6000,     dec: 0 },
+];
+const FLOW_UNITS = [
+  { id: "l_min",   label: "L/min",   factor: 1,      dec: 1 },
+  { id: "m3_h",    label: "m³/h",    factor: 0.06,   dec: 2 },
+  { id: "l_s",     label: "L/s",     factor: 1 / 60, dec: 2 },
+  { id: "l_h",     label: "L/h",     factor: 60,     dec: 0 },
+  { id: "cm3_min", label: "cm³/min", factor: 1000,   dec: 0 },
+];
+const unitById = (list, id) => list.find(u => u.id === id) || list[0];
+const fmtInUnit = (v, u) => Number.isFinite(v) ? (Math.abs(v) * u.factor).toFixed(u.dec) : "--";
 const FILTERTRACK_PREFIX = "filtertrack";
 const FLOW_EPSILON = 0.05;
 const MAX_HISTORY_POINTS = 3600;
@@ -77,6 +100,13 @@ const EXCLUDED_FILTER_NAME_PATTERNS = [
   "filtro rapido eta sul", "filtro ascendente de teste", "filtro setor industrial",
 ];
 const DEFAULT_FILTERS = JSON.parse(document.getElementById("ft-default-filters").textContent);
+// Minimal mode: fixed sand-filter installation. Locked to FIL-01 Asc · ETA
+// PRIMAVERA (id from the embedded catalog, with a station/name fallback in
+// case a catalog sync reassigns ids).
+const MINIMAL_FILTER_ID = "b3bb9015";
+const MINIMAL_FILTER_MATCH = f =>
+  /primavera/i.test(String(f.station || "")) && /\basc\b/i.test(String(f.name || ""));
+const SAND_MODE_REASSERT_MS = 5000;
 
 /* ===== UTILITIES ===== */
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -543,6 +573,68 @@ function enqueueSession(session) {
   const pending = readPendingSessions(); pending.push(session);
   writePendingSessions(pending); return pending.length;
 }
+// Overall velocity of an archived session (m/min): linear-regression slope of
+// its stored distance samples, sign flipped like the live pipeline.
+function sessionVelocityMpm(session) {
+  const series = normalizeSampleSeries(session && session.samples);
+  const n = Math.min(series.t.length, series.d.length);
+  if (n < 2) return NaN;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const x = series.t[i] / 1000;                          // s
+    const y = series.d[i] / (SAMPLE_DISTANCE_SCALE * 100); // m
+    sx += x; sy += y; sxx += x * x; sxy += x * y;
+  }
+  const den = n * sxx - sx * sx;
+  if (Math.abs(den) < 1e-9) return NaN;
+  return -((n * sxy - sx * sy) / den) * 60;
+}
+// Reconstrói a série de velocidade de uma sessão arquivada: médias de 1 s da
+// distância (filtra ruído), janela deslizante de 10 s, um ponto a cada 5 s.
+function sessionVelocitySeries(session) {
+  const s = normalizeSampleSeries(session && session.samples);
+  const n = Math.min(s.t.length, s.d.length);
+  if (n < 5 || !Number.isFinite(Number(s.t0))) return [];
+  const buckets = new Map();
+  for (let i = 0; i < n; i++) {
+    const sec = Math.floor(s.t[i] / 1000);
+    const b = buckets.get(sec) || { sum: 0, c: 0 };
+    b.sum += s.d[i] / SAMPLE_DISTANCE_SCALE;
+    b.c++;
+    buckets.set(sec, b);
+  }
+  const pts = [...buckets.entries()].sort((a, b) => a[0] - b[0])
+    .map(([sec, b]) => ({ t: sec, d: b.sum / b.c }));
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const t1 = pts[i].t;
+    if (t1 % 5 !== 0) continue;
+    const win = pts.filter(p => p.t >= t1 - 10 && p.t <= t1);
+    if (win.length < 4 || (win[win.length - 1].t - win[0].t) < 8) continue;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    win.forEach(p => { sx += p.t; sy += p.d; sxx += p.t * p.t; sxy += p.t * p.d; });
+    const m = win.length, den = m * sxx - sx * sx;
+    if (Math.abs(den) < 1e-9) continue;
+    const slopeCmPerS = (m * sxy - sx * sy) / den;
+    const v = -slopeCmPerS * 0.6;   // cm/s → m/min
+    if (Math.abs(v) <= MAX_REASONABLE_VELOCITY_M_PER_MIN) {
+      out.push({ ts: Number(s.t0) + t1 * 1000, velocityMpm: v });
+    }
+  }
+  return out;
+}
+
+function appendWashLog(records) {
+  if (!Array.isArray(records) || !records.length) return;
+  const stored = loadJson(STORAGE.washLog, []);
+  const list = Array.isArray(stored) ? stored : [];
+  const keyOf = r => `${r.boot}|${r.uptimeS}|${r.beforeMm}|${r.afterMm}`;
+  const seen = new Set(list.map(keyOf));
+  records.forEach(r => {
+    if (!seen.has(keyOf(r))) { seen.add(keyOf(r)); list.push(r); }
+  });
+  saveJson(STORAGE.washLog, list.slice(-500));
+}
 
 /* ===== BLE BRIDGE ===== */
 const bridge = (() => {
@@ -552,8 +644,9 @@ const bridge = (() => {
     deviceName: "", deviceAddress: "", devices: [],
     lastData: null, distanceSamples: [], rawLog: [], rssi: -90, errorMsg: "",
     ota: { status: "idle", sent: 0, total: 0, message: "" },
+    sandMode: null, firmwareVersion: "", controlLog: [], calInfo: null, washCfg: null,
   };
-  let errorTimer = null, discardNextDistanceSample = true;
+  let errorTimer = null, discardNextDistanceSample = true, controlSeq = 0;
   const emit = () => listeners.forEach(fn => fn(state));
   const subscribe = fn => { listeners.add(fn); fn(state); return () => listeners.delete(fn); };
   const armFirstReadingDiscard = () => { discardNextDistanceSample = true; };
@@ -575,11 +668,66 @@ const bridge = (() => {
       if (state.connected) {
         state.deviceName = normalizeDeviceName(deviceName) || state.deviceName;
         state.deviceAddress = String(deviceAddress || state.deviceAddress || "");
+        state.sandMode = null;
         clearReadingBuffers(); armFirstReadingDiscard();
       } else { state.lastData = null; }
       emit();
     },
     onDataReceived(raw) {
+      const text = String(raw || "").trim();
+      // Firmware control messages (sand mode, wash log, version, self-test)
+      // are consumed here and never reach the distance parser.
+      if (/^(SAND|WL|VER|ST|CAL|CFG)=/.test(text)) {
+        controlSeq += 1;
+        if (text.startsWith("SAND=")) state.sandMode = text === "SAND=1";
+        else if (text.startsWith("VER=")) state.firmwareVersion = text.slice(4);
+        else if (text.startsWith("CFG=")) {
+          // CFG=<key>,<val>,<def>,<min>,<max>,<desc> | CFG=END | CFG=OK,... | CFG=ERR,...
+          const body = text.slice(4);
+          const prev = state.washCfg || { items: [], loaded: false, error: "" };
+          if (body === "END") {
+            state.washCfg = { ...prev, loaded: true };
+          } else if (body.startsWith("OK,")) {
+            const p = body.slice(3).split(",");
+            const items = prev.items.map(it => it.key === p[0] ? { ...it, val: Number(p[1]) } : it);
+            state.washCfg = { ...prev, items, savedKey: p[0], savedAt: Date.now(), error: "" };
+          } else if (body.startsWith("ERR,")) {
+            state.washCfg = { ...prev, error: body.slice(4), savedAt: Date.now() };
+          } else {
+            const p = body.split(",");
+            if (p.length >= 5) {
+              const item = {
+                key: p[0], val: Number(p[1]), def: Number(p[2]),
+                min: Number(p[3]), max: Number(p[4]), desc: p.slice(5).join(","),
+              };
+              const items = prev.items.some(it => it.key === item.key)
+                ? prev.items.map(it => it.key === item.key ? item : it)
+                : [...prev.items, item];
+              state.washCfg = { ...prev, items, error: "" };
+            }
+          }
+        }
+        else if (text.startsWith("CAL=")) {
+          const body = text.slice(4);
+          if (body.startsWith("ERR,")) {
+            state.calInfo = { ...(state.calInfo || {}), error: body.slice(4), ts: Date.now() };
+          } else {
+            const parts = (body.startsWith("OK,") ? body.slice(3) : body).split(",");
+            const factor = parseFloat(parts[0]);
+            const angle = parseFloat(parts[1]);
+            if (Number.isFinite(factor)) {
+              state.calInfo = {
+                factor, angle: Number.isFinite(angle) ? angle : 0,
+                confirmed: body.startsWith("OK,"), error: "", ts: Date.now(),
+              };
+            }
+          }
+        }
+        state.controlLog = [...state.controlLog.slice(-199), { seq: controlSeq, ts: Date.now(), msg: text }];
+        state.rawLog = [...state.rawLog.slice(-149), text];
+        emit();
+        return;
+      }
       const parsed = parsePayload(raw); const ts = Date.now();
       const validationDistance = Number.isFinite(parsed.rawDistance) ? parsed.rawDistance : parsed.distance;
       if (Number.isFinite(validationDistance) && validationDistance < MIN_VALID_DISTANCE_CM) {
@@ -631,6 +779,11 @@ const bridge = (() => {
     connect: (address) => callAndroid("connect", String(address || "")),
     disconnect: () => callAndroid("disconnect"),
     openBiDashboard: () => callAndroid("openBiDashboard"),
+    openCsvGuide: () => callAndroid("openCsvGuide"),
+    setInitialGuideActive: (active) => callAndroid("setInitialGuideActive", !!active),
+    setGuideDataButtonsVisible: (visible) => callAndroid("setGuideDataButtonsVisible", !!visible),
+    completeInitialGuide: (showNextTime = false) => callAndroid("completeInitialGuide", !!showNextTime),
+    setGuideStartupPreference: (show) => callAndroid("setGuideStartupPreference", !!show),
     sendCommand: (cmd) => {
       const command = String(cmd || "");
       if (command === "1") { clearReadingBuffers(); armFirstReadingDiscard(); emit(); }
@@ -649,6 +802,7 @@ function useBLE() {
     deviceName: "", deviceAddress: "", devices: [],
     lastData: null, distanceSamples: [], rawLog: [], rssi: -90, errorMsg: "",
     ota: { status: "idle", sent: 0, total: 0, message: "" },
+    sandMode: null, firmwareVersion: "", controlLog: [], calInfo: null, washCfg: null,
   });
   useEffect(() => bridge.subscribe(state => setSnap({ ...state })), []);
   return { ...snap, ...bridge };
@@ -719,7 +873,7 @@ async function syncFilterCatalog(serverUrl, setFilters) {
   } catch (_) {}
 }
 
-/* ===== IBM CARBON × CAGECE TOKENS ===== */
+/* ===== FILTERTRACK DESIGN TOKENS ===== */
 const T = {
   blue: "#0068B4", blueHover: "#0058a0", blueActive: "#00477f", blue10: "#e6f0f9", teal: "#009ca6",
   ink: "#161616", inkMuted: "#525252", inkSubtle: "#6f6f6f", inkTertiary: "#a8a8a8",
@@ -730,7 +884,7 @@ const T = {
 };
 
 /* ===== VISUAL PRIMITIVES ===== */
-function CageceMark({ size = 32 }) {
+function FilterTrackMark({ size = 32 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
       <rect width="40" height="40" fill={T.blue} />
@@ -739,17 +893,19 @@ function CageceMark({ size = 32 }) {
   );
 }
 
+
+
 function CageceLogo({ height = 30 }) {
   return (
     <img
       src="logo_cagece.png"
-      alt="Cagece"
+      alt=""
+      aria-hidden="true"
       style={{ height, width: "auto", maxWidth: 104, display: "block", flexShrink: 0 }}
     />
   );
 }
-
-function Btn({ kind = "primary", size = "md", children, icon, iconRight, full, disabled, onClick, type = "button" }) {
+function Btn({ kind = "primary", size = "md", children, icon, iconRight, full, disabled, onClick, type = "button", ...props }) {
   const h = size === "sm" ? 40 : size === "lg" ? 56 : 48;
   const px = size === "lg" ? "0 20px" : "0 16px";
   const base = {
@@ -768,7 +924,7 @@ function Btn({ kind = "primary", size = "md", children, icon, iconRight, full, d
   };
   const s = styles[kind] || styles.primary;
   return (
-    <button type={type} disabled={disabled} onClick={onClick}
+    <button {...props} type={type} disabled={disabled} onClick={onClick}
       onMouseEnter={e => {
         if (disabled) return;
         if (kind === "primary") e.currentTarget.style.background = T.blueHover;
@@ -879,7 +1035,7 @@ function BottomTabs({ tab, onChange, onOpenData }) {
   return (
     <nav style={{ background: T.canvas, borderTop: `1px solid ${T.hairline}`, display: "flex", height: 68, flexShrink: 0 }}>
       {tabs.map(t => (
-        <button key={t.id} onClick={() => t.id === "data" ? onOpenData?.() : onChange(t.id)}
+        <button key={t.id} data-guide={t.id === "settings" ? "tab-settings" : undefined} onClick={() => t.id === "data" ? onOpenData?.() : onChange(t.id)}
           style={{
             flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center",
             justifyContent: "center", gap: 4,
@@ -898,10 +1054,10 @@ function BottomTabs({ tab, onChange, onOpenData }) {
 }
 
 /* ===== CONNECT SCREEN ===== */
-function ConnectScreen({ ble, autoConnectDevice, isPreferredDevice = () => false, scanPaused = false, manualDeviceChoice = false }) {
+function ConnectScreen({ ble, autoConnectDevice, isPreferredDevice = () => false, scanPaused = false, manualDeviceChoice = false, onEnterWithoutSensor }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <AppHeader title="FilterTrack" subtitle="Cagece · Saneamento" />
+      <AppHeader title="FilterTrack" subtitle="Monitoramento de filtros" />
       <div style={{ flex: 1, overflow: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: 20, background: T.surface1 }}>
         <div>
           <h2 style={{ fontSize: 28, fontWeight: 300, letterSpacing: 0, lineHeight: 1.2, marginBottom: 8 }}>Conectar dispositivo</h2>
@@ -937,6 +1093,13 @@ function ConnectScreen({ ble, autoConnectDevice, isPreferredDevice = () => false
           </Tile>
         )}
 
+        <Tile padding={16}>
+          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 6 }}>Sem sensor por perto?</div>
+          <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
+            Entre no app completo para consultar sessões, filtros, CSV e BI. Recursos de medição continuarão bloqueados até conectar um sensor.
+          </div>
+          <Btn kind="tertiary" full onClick={() => onEnterWithoutSensor?.()}>Entrar sem sensor</Btn>
+        </Tile>
         {ble.devices.length > 0 && (
           <div>
             <div style={{ fontSize: 13, color: T.inkMuted, letterSpacing: 0.32, marginBottom: 10, textTransform: "uppercase" }}>
@@ -1028,6 +1191,122 @@ function FlowChart({ history }) {
   return <canvas ref={ref} style={{ width: "100%", height: 180, display: "block" }} />;
 }
 
+/* Chart do modo simplificado: mais detalhe que o FlowChart — grade fina com
+   horários reais, separação visual de cada processo de filtração (um gap nas
+   amostras = lavagem/reinício de sessão) e marcador do valor atual. */
+const MINIMAL_CYCLE_GAP_MS = 45000;
+
+function splitFlowCycles(points) {
+  const cycles = [];
+  let cur = [];
+  for (let i = 0; i < points.length; i++) {
+    if (cur.length > 0 && points[i].ts - points[i - 1].ts > MINIMAL_CYCLE_GAP_MS) {
+      cycles.push(cur);
+      cur = [];
+    }
+    cur.push(points[i]);
+  }
+  if (cur.length > 0) cycles.push(cur);
+  return cycles;
+}
+
+function MinimalFlowChart({ history }) {
+  const ref = useRef(null);
+  const sampled = useMemo(() => downsample(history, 300), [history]);
+  useEffect(() => {
+    const c = ref.current; if (!c) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = c.clientWidth, H = c.clientHeight;
+    if (!W || !H) return;
+    c.width = W * dpr; c.height = H * dpr;
+    const g = c.getContext("2d"); g.scale(dpr, dpr);
+    g.clearRect(0, 0, W, H); g.fillStyle = T.canvas; g.fillRect(0, 0, W, H);
+    if (sampled.length < 2) {
+      g.fillStyle = T.inkTertiary; g.font = "14px IBM Plex Sans"; g.textAlign = "center";
+      g.fillText("Aguardando dados...", W / 2, H / 2); return;
+    }
+    const pad = { l: 52, r: 14, t: 16, b: 30 };
+    const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+    const ts = sampled.map(p => p.ts), vs = sampled.map(p => Math.abs(p.velocityMpm));
+    const tMin = ts[0], tMax = ts[ts.length - 1];
+    const vMin = Math.min(...vs), vMax = Math.max(...vs);
+    const vPad = Math.max(0.03, (vMax - vMin) * 0.18);
+    const yMin = Math.max(0, vMin - vPad), yMax = vMax + vPad;
+    const xOf = t => pad.l + (t - tMin) / (tMax - tMin || 1) * cw;
+    const y = v => pad.t + (1 - (v - yMin) / (yMax - yMin || 1)) * ch;
+
+    // Grade horizontal (5 divisões; casas decimais conforme a faixa)
+    const yDec = (yMax - yMin) < 0.2 ? 3 : 2;
+    g.strokeStyle = T.hairline; g.lineWidth = 1;
+    for (let i = 0; i <= 5; i++) {
+      const yy = pad.t + (i / 5) * ch;
+      g.beginPath(); g.moveTo(pad.l, yy); g.lineTo(W - pad.r, yy); g.stroke();
+      const v = yMax - (i / 5) * (yMax - yMin);
+      g.fillStyle = T.inkSubtle; g.font = "10px IBM Plex Mono"; g.textAlign = "right";
+      g.fillText(v.toFixed(yDec), pad.l - 6, yy + 3);
+    }
+
+    // Grade vertical com horários reais
+    const spanMs = tMax - tMin;
+    const shortSpan = spanMs < 10 * 60 * 1000;
+    const timeFmt = shortSpan
+      ? { hour: "2-digit", minute: "2-digit", second: "2-digit" }
+      : { hour: "2-digit", minute: "2-digit" };
+    const nTicks = shortSpan ? 2 : 4;   // rótulos HH:MM:SS são largos
+    g.font = "10px IBM Plex Mono";
+    for (let i = 0; i <= nTicks; i++) {
+      const t = tMin + (i / nTicks) * spanMs;
+      const xx = xOf(t);
+      if (i > 0 && i < nTicks) {
+        g.strokeStyle = T.hairline; g.beginPath();
+        g.moveTo(xx, pad.t); g.lineTo(xx, pad.t + ch); g.stroke();
+      }
+      g.fillStyle = T.inkSubtle;
+      g.textAlign = i === 0 ? "left" : i === nTicks ? "right" : "center";
+      g.fillText(new Date(t).toLocaleTimeString("pt-BR", timeFmt), xx, H - 8);
+    }
+
+    // Cada processo de filtração vira um segmento próprio (linha + área);
+    // a divisa entre eles (lavagem/reinício) é uma linha tracejada.
+    const cycles = splitFlowCycles(sampled);
+    cycles.forEach((cycle, ci) => {
+      if (ci > 0) {
+        const xx = xOf(cycle[0].ts);
+        g.save();
+        g.strokeStyle = T.inkTertiary; g.lineWidth = 1; g.setLineDash([4, 4]);
+        g.beginPath(); g.moveTo(xx, pad.t); g.lineTo(xx, pad.t + ch); g.stroke();
+        g.restore();
+      }
+      if (cycle.length < 2) return;
+      g.strokeStyle = T.blue; g.lineWidth = 2; g.beginPath();
+      cycle.forEach((p, i) => {
+        const px = xOf(p.ts), py = y(Math.abs(p.velocityMpm));
+        if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+      });
+      g.stroke();
+      g.lineTo(xOf(cycle[cycle.length - 1].ts), pad.t + ch);
+      g.lineTo(xOf(cycle[0].ts), pad.t + ch);
+      g.closePath(); g.fillStyle = T.blue + "18"; g.fill();
+    });
+
+    // Marcador do valor atual
+    const last = sampled[sampled.length - 1];
+    const lx = xOf(last.ts), ly = y(Math.abs(last.velocityMpm));
+    g.fillStyle = T.blue;
+    g.beginPath(); g.arc(lx, ly, 4, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = T.canvas; g.lineWidth = 1.5; g.stroke();
+    const label = Math.abs(last.velocityMpm).toFixed(2);
+    g.font = "11px IBM Plex Mono";
+    const tw = g.measureText(label).width;
+    const bx = Math.min(Math.max(lx - tw / 2, pad.l), W - pad.r - tw - 8);
+    g.fillStyle = T.blue;
+    g.fillRect(bx - 4, Math.max(2, ly - 24), tw + 8, 16);
+    g.fillStyle = "#ffffff"; g.textAlign = "left";
+    g.fillText(label, bx, Math.max(2, ly - 24) + 12);
+  }, [sampled]);
+  return <canvas ref={ref} style={{ width: "100%", height: 230, display: "block" }} />;
+}
+
 function DistanceDebugChart({ history }) {
   const ref = useRef(null);
   const sampled = useMemo(() => downsample((history || []).filter(p => Number.isFinite(p.distance)), 220), [history]);
@@ -1115,7 +1394,7 @@ function MonitorTab({ ble, filter, flowVelocity, flowInstant, flowHistory, flowR
     </div>
   );
   return (
-    <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, background: T.surface1 }}>
+    <div data-guide="full-monitor" style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, background: T.surface1 }}>
       {/* Connection bar */}
       <Tile padding={14} style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ width: 10, height: 10, background: T.success, borderRadius: 10, flexShrink: 0, boxShadow: `0 0 0 4px ${T.success}22` }} />
@@ -1124,7 +1403,7 @@ function MonitorTab({ ble, filter, flowVelocity, flowInstant, flowHistory, flowR
           {!hideDeviceAddress && <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle, overflowWrap: "anywhere" }}>{ble.deviceAddress}</div>}
         </div>
         <SignalBars rssi={ble.rssi} />
-        <button onClick={ble.disconnect} style={{ fontSize: 14, color: T.blue, padding: "4px 6px", flexShrink: 0 }}>Desconectar</button>
+        <button data-requires-sensor="true" onClick={ble.disconnect} style={{ fontSize: 14, color: T.blue, padding: "4px 6px", flexShrink: 0 }}>Desconectar</button>
       </Tile>
 
       {/* Filter chooser */}
@@ -1206,10 +1485,10 @@ function MonitorTab({ ble, filter, flowVelocity, flowInstant, flowHistory, flowR
               {formatDuration(sessionNow - activeSessionMeta.startedAtMs)} · {sampleSeriesCount(activeSessionMeta?.samples || null)} amostras
             </div>
           </div>
-          <Btn kind="danger" size="sm" onClick={onStartSession}>Encerrar</Btn>
+          <Btn data-requires-sensor="true" kind="danger" size="sm" onClick={onStartSession}>Encerrar</Btn>
         </Tile>
       ) : (
-        <Btn kind="primary" size="lg" full disabled={!filter} onClick={onStartSession}
+        <Btn data-requires-sensor="true" kind="primary" size="lg" full disabled={!filter} onClick={onStartSession}
           iconRight={<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="4" /></svg>}>
           Iniciar sessão de coleta
         </Btn>
@@ -1444,11 +1723,39 @@ function DebugPanel({ ble, debugInfo }) {
 }
 
 /* ===== SETTINGS TAB ===== */
-function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSession, onRestartSensor, debugMode, setDebugMode, debugInfo }) {
+function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSession, onRestartSensor, debugMode, setDebugMode, debugInfo, onEnterMinimal, onStartGuide, showGuideOnStartup, onShowGuideOnStartupChange, velocityUnitId, setVelocityUnitId, flowUnitId, setFlowUnitId, minVelocity, setMinVelocity }) {
   const [url, setUrl] = useState(serverUrl);
   const [saved, setSaved] = useState(false);
   const [commandStatus, setCommandStatus] = useState("");
   const [confirmAction, setConfirmAction] = useState(null);
+  const [calInput, setCalInput] = useState("");
+  const [cfgEdits, setCfgEdits] = useState({});
+  const [minVelText, setMinVelText] = useState(String(minVelocity ?? 0.25));
+  useEffect(() => {
+    if (!ble?.connected) return;
+    // A conexão fica "Connected" antes da descoberta de serviços terminar;
+    // enviar imediatamente derruba o comando (no gatt/char).
+    const t = setTimeout(() => ble.sendCommand?.("CAL:GET"), 1500);
+    const t2 = setTimeout(() => ble.sendCommand?.("CFG:GET"), 2500);
+    return () => { clearTimeout(t); clearTimeout(t2); };
+  }, [ble?.connected]);
+  const washCfg = ble?.washCfg || null;
+  const cfgSave = (item) => {
+    const raw = cfgEdits[item.key];
+    const v = Math.round(Number(String(raw).replace(",", ".")));
+    if (!Number.isFinite(v)) { setCommandStatus("Valor inválido."); return; }
+    ble?.sendCommand?.(`CFG:SET:${item.key}:${v}`);
+    setCfgEdits(e => { const n = { ...e }; delete n[item.key]; return n; });
+  };
+  const cfgReset = () => {
+    setConfirmAction({
+      title: "Restaurar padrões",
+      message: "Todos os fatores da detecção de lavagem voltam aos valores de fábrica do firmware.",
+      confirmLabel: "Restaurar",
+      tone: "danger",
+      onConfirm: () => { ble?.sendCommand?.("CFG:RESET"); setTimeout(() => ble?.sendCommand?.("CFG:GET"), 800); setCfgEdits({}); },
+    });
+  };
   const save = () => { setServerUrl(url); setSaved(true); setTimeout(() => setSaved(false), 2000); };
   const sendSensorCommand = (cmd, label) => {
     if (!ble?.connected) {
@@ -1488,6 +1795,36 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
     setConfirmAction(null);
     action?.onConfirm?.();
   };
+  const calInfo = ble?.calInfo || null;
+  const calLiveCm = ble?.lastData && Number.isFinite(ble.lastData.distance) ? ble.lastData.distance : NaN;
+  const CAL_ERROR_TEXT = {
+    valor: "Valor inválido.",
+    semleitura: "Sensor sem leitura recente — aguarde alguns segundos e tente de novo.",
+    faixa: "A distância informada está muito diferente da medida pelo sensor. Confira o valor.",
+  };
+  const calibrateSensor = () => {
+    const real = parseFloat(String(calInput).replace(",", "."));
+    if (!Number.isFinite(real) || real <= 0) {
+      setCommandStatus("Informe a distância real até a água em cm.");
+      return;
+    }
+    setConfirmAction({
+      title: "Calibrar inclinação do sensor",
+      message: `O sensor mede ${Number.isFinite(calLiveCm) ? calLiveCm.toFixed(1) : "--"} cm agora e a distância real informada é ${real} cm. Faça isso com o nível parado (filtro fora de lavagem). O fator de correção fica salvo no sensor e passa a corrigir todas as medições.`,
+      confirmLabel: "Calibrar",
+      tone: "secondary",
+      onConfirm: () => sendSensorCommand(`CAL:SET:${real}`, "Comando de calibração"),
+    });
+  };
+  const clearCalibration = () => {
+    setConfirmAction({
+      title: "Remover calibração",
+      message: "O sensor voltará a usar a distância medida sem correção de inclinação.",
+      confirmLabel: "Remover",
+      tone: "danger",
+      onConfirm: () => sendSensorCommand("CAL:CLEAR", "Comando de remoção"),
+    });
+  };
   const ota = ble?.ota || { status: "idle", sent: 0, total: 0, message: "" };
   const otaBusy = ["starting", "transferring", "verifying"].includes(ota.status);
   const otaPct = ota.total > 0 ? Math.round((ota.sent / ota.total) * 100) : 0;
@@ -1503,7 +1840,7 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
   return (
     <>
     <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 16, background: T.surface1 }}>
-      <Tile padding={16}>
+      <Tile data-requires-sensor="true" padding={16}>
         <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Sensor</div>
         <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
           Comandos BLE para o firmware FilterTrackV3.
@@ -1524,7 +1861,152 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
         </div>
       </Tile>
 
+      <Tile data-requires-sensor="true" padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Calibração de inclinação</div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
+          Se o sensor estiver inclinado, ele mede uma distância maior que a real. Com o nível parado (fora de lavagem), meça a distância vertical real até a água e informe abaixo: o sensor calcula o ângulo e passa a corrigir todas as medições.
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+          <span style={{ fontSize: 13, color: T.inkSubtle }}>Distância medida agora</span>
+          <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+            {Number.isFinite(calLiveCm) ? `${calLiveCm.toFixed(1)} cm` : "--"}
+          </span>
+        </div>
+        <input
+          value={calInput}
+          onChange={e => setCalInput(e.target.value)}
+          inputMode="decimal"
+          placeholder="Distância real até a água (cm)"
+          style={{
+            width: "100%", height: 48, padding: "0 14px", background: T.surface1,
+            border: "none", borderBottom: `1px solid ${T.hairlineStrong}`,
+            fontSize: 14, color: T.ink, marginBottom: 8,
+          }}
+        />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+          <Btn kind="secondary" full disabled={!ble?.connected || !Number.isFinite(calLiveCm)} onClick={calibrateSensor}>
+            Calibrar
+          </Btn>
+          <Btn kind="tertiary" full disabled={!ble?.connected} onClick={clearCalibration}>
+            Remover calibração
+          </Btn>
+        </div>
+        <div style={{ fontSize: 12, marginTop: 10, color: calInfo?.error ? (T.red || "#da1e28") : T.inkSubtle }}>
+          {calInfo?.error
+            ? (CAL_ERROR_TEXT[calInfo.error] || `Erro na calibração: ${calInfo.error}`)
+            : calInfo
+              ? (calInfo.factor < 1
+                  ? `Calibrado: fator ${calInfo.factor.toFixed(4)} · inclinação ${calInfo.angle.toFixed(1)}°`
+                  : "Sem correção ativa (fator 1,0000).")
+              : (ble?.connected ? "Consultando calibração…" : "Conecte um sensor para calibrar.")}
+        </div>
+      </Tile>
+
       <Tile padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Unidades e exibição</div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 6 }}>Velocidade</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {VELOCITY_UNITS.map(u => (
+            <button key={u.id} onClick={() => setVelocityUnitId?.(u.id)} style={{
+              padding: "8px 12px", fontSize: 13, fontFamily: T.mono,
+              background: velocityUnitId === u.id ? T.blue : T.surface1,
+              color: velocityUnitId === u.id ? "#fff" : T.ink,
+              border: `1px solid ${velocityUnitId === u.id ? T.blue : T.hairlineStrong}`,
+            }}>{u.label}</button>
+          ))}
+        </div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 6 }}>Vazão</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {FLOW_UNITS.map(u => (
+            <button key={u.id} onClick={() => setFlowUnitId?.(u.id)} style={{
+              padding: "8px 12px", fontSize: 13, fontFamily: T.mono,
+              background: flowUnitId === u.id ? T.blue : T.surface1,
+              color: flowUnitId === u.id ? "#fff" : T.ink,
+              border: `1px solid ${flowUnitId === u.id ? T.blue : T.hairlineStrong}`,
+            }}>{u.label}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13 }}>Velocidade mínima para exibir</div>
+            <div style={{ fontSize: 11, color: T.inkTertiary }}>
+              Abaixo disso é ruído: nada aparece nem entra no gráfico (m/min).
+            </div>
+          </div>
+          <input
+            value={minVelText}
+            onChange={e => {
+              setMinVelText(e.target.value);
+              const v = parseFloat(String(e.target.value).replace(",", "."));
+              if (Number.isFinite(v) && v >= 0 && v <= 10) setMinVelocity?.(v);
+            }}
+            inputMode="decimal"
+            style={{
+              width: 84, height: 40, padding: "0 10px", background: T.surface1,
+              border: "none", borderBottom: `1px solid ${T.hairlineStrong}`,
+              fontSize: 14, fontFamily: T.mono, color: T.ink, textAlign: "right",
+            }}
+          />
+        </div>
+      </Tile>
+
+      <Tile data-requires-sensor="true" padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Detecção de lavagem</div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
+          Fatores da detecção no sensor (desvio que abre a lavagem, estabilidade que encerra, agregação de eventos por vazão, trava entre lavagens). Os valores ficam salvos no sensor.
+        </div>
+        {!washCfg || !washCfg.items?.length ? (
+          <Btn kind="tertiary" full disabled={!ble?.connected} onClick={() => ble?.sendCommand?.("CFG:GET")}>
+            Carregar configuração
+          </Btn>
+        ) : (
+          <>
+            {washCfg.items.map(item => {
+              const editing = cfgEdits[item.key] !== undefined;
+              const shown = editing ? cfgEdits[item.key] : String(item.val);
+              const changed = editing && String(item.val) !== String(cfgEdits[item.key]).trim();
+              return (
+                <div key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${T.hairline}` }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13 }}>{item.desc}</div>
+                    <div style={{ fontSize: 11, color: T.inkTertiary, fontFamily: T.mono }}>
+                      {item.key} · {item.min}–{item.max} · padrão {item.def}
+                    </div>
+                  </div>
+                  <input
+                    value={shown}
+                    onChange={e => setCfgEdits(ed => ({ ...ed, [item.key]: e.target.value }))}
+                    inputMode="numeric"
+                    style={{
+                      width: 84, height: 40, padding: "0 10px", background: T.surface1,
+                      border: "none", borderBottom: `1px solid ${T.hairlineStrong}`,
+                      fontSize: 14, fontFamily: T.mono, color: T.ink, textAlign: "right",
+                    }}
+                  />
+                  {changed && (
+                    <button onClick={() => cfgSave(item)} style={{ fontSize: 13, color: T.blue, padding: "6px 8px", flexShrink: 0 }}>
+                      Salvar
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <Btn kind="tertiary" disabled={!ble?.connected} onClick={() => ble?.sendCommand?.("CFG:GET")}>Recarregar</Btn>
+              <Btn kind="tertiary" disabled={!ble?.connected} onClick={cfgReset}>Restaurar padrões</Btn>
+            </div>
+            <div style={{ fontSize: 12, marginTop: 10, color: washCfg.error ? (T.red || "#da1e28") : T.inkSubtle }}>
+              {washCfg.error
+                ? `Erro: ${washCfg.error}`
+                : washCfg.savedKey
+                  ? `"${washCfg.savedKey}" salvo no sensor.`
+                  : (washCfg.loaded ? "Configuração carregada do sensor." : "Carregando…")}
+            </div>
+          </>
+        )}
+      </Tile>
+
+      <Tile data-requires-sensor="true" padding={16}>
         <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Firmware</div>
         <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
           Atualização OTA via Bluetooth (arquivo .bin do build).
@@ -1557,6 +2039,25 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
             ) : null}
           </>
         )}
+      </Tile>
+
+      <Tile padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Tutorial</div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
+          Refaça o guia interativo nas telas reais do app quando precisar.
+        </div>
+        <Btn kind="tertiary" full onClick={() => onStartGuide?.()}>Abrir tutorial</Btn>
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 14, cursor: "pointer" }}>
+          <span style={{ fontSize: 13, color: T.inkSubtle }}>Mostrar ao abrir o app</span>
+          <input type="checkbox" checked={!!showGuideOnStartup} onChange={e => onShowGuideOnStartupChange?.(e.target.checked)} style={{ width: 22, height: 22, flexShrink: 0 }} />
+        </label>
+      </Tile>
+      <Tile data-guide="settings-minimal" padding={16}>
+        <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Modo simplificado</div>
+        <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
+          Tela única para o filtro fixo de areia (ETA PRIMAVERA): conexão automática, sessões automáticas por lavagem e sincronização em segundo plano.
+        </div>
+        <Btn kind="secondary" full onClick={() => onEnterMinimal?.()}>Usar modo simplificado</Btn>
       </Tile>
 
       <Tile padding={16}>
@@ -1613,7 +2114,7 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
 function FilterPickerOverlay({ filters, suggestedFilter, onPick, onClose }) {
   return (
     <div style={{ position: "absolute", inset: 0, background: T.canvas, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", zIndex: 20 }}>
-      <AppHeader title="Selecionar filtro" subtitle="Catálogo Cagece" onBack={onClose} />
+      <AppHeader title="Selecionar filtro" subtitle="Catálogo de filtros" onBack={onClose} />
       {suggestedFilter && (
         <div style={{ padding: "12px 16px", background: T.surface1, borderBottom: `1px solid ${T.hairline}` }}>
           <Tile padding={14}>
@@ -1633,7 +2134,415 @@ function FilterPickerOverlay({ filters, suggestedFilter, onPick, onClose }) {
   );
 }
 
+/* ===== INTERACTIVE GUIDE ===== */
+const INITIAL_GUIDE_STEPS = [
+  { eyebrow: "Guia · 1 de 13", title: "Bem-vindo ao FilterTrack", body: "Vamos conhecer o app juntos. Você vai usar os mesmos botões do dia a dia e acompanhar uma medição de exemplo, sem precisar conectar um sensor. Nada desta demonstração será salvo.", next: "Começar o passeio" },
+  { eyebrow: "Guia · 2 de 13", title: "Sensor e filtro", body: "Aqui você confirma a estação, a área do filtro, a conexão e a força do sinal.", target: "minimal-header", next: "Continuar" },
+  { eyebrow: "Guia · 3 de 13", title: "Velocidade e vazão", body: "Velocidade indica a variação do nível. Vazão combina essa velocidade com a área do filtro. Estes valores são simulados.", target: "minimal-metrics", next: "Ver gráfico" },
+  { eyebrow: "Guia · 4 de 13", title: "Gráfico em tempo real", body: "A curva permite acompanhar toda a lavagem. Abaixo dela ficam média, máximo, mínimo e duração.", target: "minimal-chart", next: "Ir ao modo completo" },
+  { eyebrow: "Guia · 5 de 13", title: "Abra o modo completo", body: "Toque no controle destacado. É exatamente assim que você muda de modo durante o uso normal.", target: "open-full", requireTargetTap: true },
+  { eyebrow: "Guia · 6 de 13", title: "Monitor completo", body: "Neste modo você escolhe filtros, controla sessões e acessa mais detalhes da medição.", target: "full-monitor", next: "Ver Ajustes" },
+  { eyebrow: "Guia · 7 de 13", title: "Abra Ajustes", body: "Toque na aba Ajustes destacada para conhecer configurações e o caminho de volta.", target: "tab-settings", requireTargetTap: true },
+  { eyebrow: "Guia · 8 de 13", title: "Volte ao simplificado", body: "Este é o controle real para retornar à operação automática da ETA Primavera. Toque nele agora.", target: "settings-minimal", requireTargetTap: true },
+  { eyebrow: "Guia · 9 de 13", title: "Abra o analisador CSV", body: "Toque no botão CSV destacado no canto inferior direito. Ele funciona offline e abrirá dados de exemplo.", target: "native-csv", requireTargetTap: true },
+];
+
+function InitialGuide({ step, onNext, onSkip }) {
+  const item = Number.isInteger(step) ? INITIAL_GUIDE_STEPS[step] : null;
+  const [targetRect, setTargetRect] = useState(null);
+  const [confirmExit, setConfirmExit] = useState(false);
+  const [showNextTime, setShowNextTime] = useState(false);
+  useEffect(() => { setConfirmExit(false); }, [step]);
+  useEffect(() => {
+    if (!item?.target) { setTargetRect(null); return; }
+    let cancelled = false;
+    const locate = () => {
+      if (cancelled) return;
+      if (item.target === "native-csv") {
+        setTargetRect({ left: window.innerWidth - 70, top: window.innerHeight - 188, width: 60, height: 60, right: window.innerWidth - 10, bottom: window.innerHeight - 128 });
+        return;
+      }
+      const node = document.querySelector(`[data-guide="${item.target}"]`);
+      if (!node) { setTargetRect(null); return; }
+      const rect = node.getBoundingClientRect();
+      setTargetRect({ left: rect.left - 5, top: rect.top - 5, width: rect.width + 10, height: rect.height + 10, right: rect.right + 5, bottom: rect.bottom + 5 });
+    };
+    const node = document.querySelector(`[data-guide="${item.target}"]`);
+    node?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(locate, 180);
+    window.addEventListener("resize", locate);
+    window.addEventListener("scroll", locate, true);
+    return () => { cancelled = true; clearTimeout(timer); window.removeEventListener("resize", locate); window.removeEventListener("scroll", locate, true); };
+  }, [step, item?.target]);
+  if (!item) return null;
+
+  const gap = 8;
+  const r = targetRect;
+  const blockers = r ? [
+    { left: 0, top: 0, right: 0, height: Math.max(0, r.top) },
+    { left: 0, top: r.top, width: Math.max(0, r.left), height: r.height },
+    { left: r.right, top: r.top, right: 0, height: r.height },
+    { left: 0, top: r.bottom, right: 0, bottom: 0 },
+  ] : [{ inset: 0 }];
+  const cardPosition = r
+    ? (r.top > window.innerHeight / 2
+      ? { bottom: Math.max(12, window.innerHeight - r.top + gap) }
+      : { top: Math.min(window.innerHeight - 230, r.bottom + gap) })
+    : { bottom: 16 };
+
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="initial-guide-title" style={{ position: "fixed", inset: 0, zIndex: 10000, pointerEvents: "none" }}>
+      {blockers.map((style, index) => <div key={index} style={{ position: "fixed", background: "rgba(8,12,20,.58)", pointerEvents: "auto", ...style }} />)}
+      {r && <div style={{ position: "fixed", left: r.left, top: r.top, width: r.width, height: r.height, border: `3px solid ${T.blue}`, boxShadow: `0 0 0 4px ${T.blue}44`, zIndex: 10001, pointerEvents: "none", animation: "pulse 1.3s ease-in-out infinite" }} />}
+      <div style={{ position: "fixed", left: 12, right: 12, maxWidth: 520, margin: "0 auto", zIndex: 10002, pointerEvents: "auto", ...cardPosition }}>
+        <div style={{ background: T.canvas, borderTop: `4px solid ${T.blue}`, padding: 18, boxShadow: "0 12px 36px rgba(0,0,0,.32)" }}>
+          <div style={{ color: T.blue, fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>{item.eyebrow}</div>
+          <div id="initial-guide-title" style={{ fontSize: 20, fontWeight: 600, margin: "6px 0" }}>{confirmExit ? "Sair do guia?" : item.title}</div>
+          {confirmExit ? (
+            <>
+              <div style={{ fontSize: 14, color: T.inkMuted }}>Você pode reabrir o tutorial em Ajustes a qualquer momento.</div>
+              <label style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 14, fontSize: 14 }}>
+                <input type="checkbox" checked={showNextTime} onChange={e => setShowNextTime(e.target.checked)} style={{ width: 20, height: 20 }} />
+                Mostrar novamente na próxima abertura
+              </label>
+              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                <Btn kind="tertiary" full onClick={() => setConfirmExit(false)}>Continuar guia</Btn>
+                <Btn full onClick={() => onSkip(showNextTime)}>Sair</Btn>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 14, lineHeight: 1.45, color: T.ink }}>{item.body}</div>
+              {item.requireTargetTap && <div style={{ marginTop: 10, color: T.blue, fontSize: 13, fontWeight: 600 }}>Toque na área destacada para continuar.</div>}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
+                <button onClick={() => setConfirmExit(true)} style={{ minHeight: 42, padding: "0 6px", color: T.inkSubtle, textDecoration: "underline" }}>Sair</button>
+                {!item.requireTargetTap && <Btn full onClick={onNext}>{item.next}</Btn>}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 /* ===== APP ROOT ===== */
+/* ===== MINIMAL MODE ===== */
+function MinimalScreen({ ble, filter, flowVelocity, flowInstant, flowHistory, flowReason, flowWaitSeconds, recentSessions, washActive, washEvents, flowStats, velocityUnit, flowUnit, onOpenFull, onDisconnect }) {
+  const connected = !!ble.connected;
+  const vu = velocityUnit || VELOCITY_UNITS[0];
+  const fu = flowUnit || FLOW_UNITS[0];
+  const hasVelocity = Number.isFinite(flowVelocity);
+  const hasFlow = hasVelocity && Number.isFinite(flowInstant);
+  const collecting = !hasVelocity && Number(flowWaitSeconds) > 0;
+  const velocityClass = classifyFlow(flowVelocity);
+  const flowClass = classifyFlow(flowInstant);
+  const [openSession, setOpenSession] = useState(null);
+  const chartHistory = useMemo(() =>
+    (flowHistory || []).filter(p => Number.isFinite(p.velocityMpm))
+      .map(p => ({ ts: p.ts, velocityMpm: Math.abs(p.velocityMpm) * vu.factor })),
+    [flowHistory, vu]);
+  const statusText = collecting
+    ? `Coletando dados (${Math.max(0, Math.ceil(Number(flowWaitSeconds)))}s)`
+    : String(flowReason || "Aguardando dados.").trim();
+  const metricValueStyle = { fontFamily: T.mono, fontSize: 68, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", letterSpacing: -1 };
+  const metricLabelStyle = { fontSize: 13, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 };
+  const chartStats = useMemo(() => {
+    if (chartHistory.length < 2) return null;
+    const cycles = splitFlowCycles(chartHistory);
+    const vs = chartHistory.map(p => Math.abs(p.velocityMpm));
+    const cur = cycles[cycles.length - 1];
+    return {
+      cycles: cycles.length,
+      avg: vs.reduce((a, b) => a + b, 0) / vs.length,
+      curDurationMs: cur.length > 1 ? cur[cur.length - 1].ts - cur[0].ts : 0,
+    };
+  }, [chartHistory]);
+  const stats5 = flowStats || { max: NaN, min: NaN };
+  const openFullLink = (
+    <button data-guide="open-full" onClick={onOpenFull} style={{ fontSize: 13, color: T.inkSubtle, padding: 12, textDecoration: "underline", alignSelf: "center" }}>
+      Abrir app completo
+    </button>
+  );
+  if (!connected) {
+    return (
+      <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: T.surface1 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, padding: 24 }}>
+          <CageceLogo height={40} />
+          <div style={{ fontSize: 22, fontWeight: 600 }}>FilterTrack</div>
+          <Spinner size={28} />
+          <div style={{ fontSize: 16, color: T.inkSubtle, textAlign: "center" }}>Procurando sensor…</div>
+          <div style={{ fontSize: 13, color: T.inkTertiary, textAlign: "center" }}>
+            {ble.errorMsg || "Mantenha o Bluetooth ligado e aproxime-se do sensor."}
+          </div>
+        </div>
+        {openFullLink}
+      </div>
+    );
+  }
+  return (
+    <div style={{ width: "100%", height: "100%", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: T.surface1, overflow: "auto" }}>
+      <div data-guide="minimal-header" style={{ padding: "14px 12px", display: "flex", alignItems: "center", gap: 8, background: T.canvas, borderBottom: `1px solid ${T.hairline}` }}>
+        <button onClick={onDisconnect} aria-label="Voltar e desconectar do sensor" title="Desconectar do sensor" style={{ width: 40, height: 40, display: "grid", placeItems: "center", color: T.ink, flexShrink: 0 }}>
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M10 3l-5 5 5 5" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
+        <span style={{ width: 10, height: 10, background: T.success, borderRadius: 10, flexShrink: 0, boxShadow: `0 0 0 4px ${T.success}22` }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500, fontSize: 15 }}>{filter ? filter.station : (ble.deviceName || "Sensor")}</div>
+          <div style={{ fontSize: 12, color: T.inkSubtle }}>
+            {filter ? `${filter.location} · ${filter.businessUnit} · Área ${formatAreaLabel(filter.areaM2)}` : "Sensor conectado"}
+          </div>
+        </div>
+        <SignalBars rssi={ble.rssi} />
+      </div>
+
+      {washActive && (
+        <div style={{
+          padding: "12px 16px", display: "flex", alignItems: "center", gap: 10,
+          background: "#fcf4d6", borderBottom: "1px solid #f1c21b",
+        }}>
+          <Spinner size={16} />
+          <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>
+            Lavagem em andamento
+            {washEvents > 0 && (
+              <span style={{ fontWeight: 400, fontSize: 12, color: T.inkSubtle, marginLeft: 8 }}>
+                {washEvents} evento{washEvents > 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div data-guide="minimal-metrics" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+          <Tile padding={20}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={metricLabelStyle}>Velocidade de subida</div>
+              {hasVelocity && <Tag tone={velocityClass.tone}>{velocityClass.label}</Tag>}
+            </div>
+            <div style={metricValueStyle}>
+              {hasVelocity ? fmtInUnit(flowVelocity, vu) : "--"}
+              <span style={{ fontSize: 18, color: T.inkSubtle, marginLeft: 8, letterSpacing: 0 }}>{vu.label}</span>
+            </div>
+            {collecting && (
+              <div style={{ marginTop: 12, fontSize: 12, color: T.inkSubtle, display: "flex", alignItems: "center", gap: 8 }}>
+                <Spinner size={13} /><span>{statusText}</span>
+              </div>
+            )}
+          </Tile>
+          <Tile padding={20}>
+            <div style={metricLabelStyle}>Vazão</div>
+            <div style={{
+              ...metricValueStyle,
+              color: hasFlow && flowClass.tone === "danger" ? T.danger : hasFlow && flowClass.tone === "success" ? T.success : T.ink,
+            }}>
+              {hasFlow ? fmtInUnit(flowInstant, fu) : "--"}
+              <span style={{ fontSize: 18, color: T.inkSubtle, marginLeft: 8, letterSpacing: 0 }}>{fu.label}</span>
+            </div>
+            {collecting && (
+              <div style={{ marginTop: 12, fontSize: 12, color: T.inkSubtle }}>{statusText}</div>
+            )}
+          </Tile>
+        </div>
+
+        <Tile data-guide="minimal-chart" padding={0} style={{ overflow: "hidden" }}>
+          <div style={{ padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${T.hairline}` }}>
+            <div style={{ fontSize: 14, fontWeight: 500 }}>Velocidade de subida</div>
+            <Tag tone="blue">tempo real</Tag>
+          </div>
+          <MinimalFlowChart history={chartHistory} />
+          {chartStats && (
+            <div style={{
+              display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8,
+              padding: "10px 16px 14px", borderTop: `1px solid ${T.hairline}`,
+            }}>
+              {[
+                ["Média", chartStats.avg.toFixed(vu.dec)],
+                ["Máx", fmtInUnit(stats5.max, vu)],
+                ["Mín", fmtInUnit(stats5.min, vu)],
+                ["Duração", chartStats.curDurationMs > 0 ? formatDuration(chartStats.curDurationMs) : "--"],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <div style={{ fontSize: 10, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>{label}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 14, marginTop: 2 }}>{value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Tile>
+
+        {recentSessions && recentSessions.length > 0 && (
+          <Tile padding={0} style={{ overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px", fontSize: 14, fontWeight: 500, borderBottom: `1px solid ${T.hairline}` }}>
+              Últimas medições
+            </div>
+            {recentSessions.map((s, i) => {
+              const v = sessionVelocityMpm(s);
+              const area = s.filter ? Number(s.filter.areaM2) : NaN;
+              const f = computeFlowFromVelocityLpm(area, v);
+              const cls = classifyFlow(f);
+              const started = s.startedAt
+                ? new Date(s.startedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+                : "";
+              const duration = s.startedAt && s.endedAt ? Date.parse(s.endedAt) - Date.parse(s.startedAt) : NaN;
+              return (
+                <div key={s.id || i} onClick={() => setOpenSession(s)} style={{
+                  padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
+                  borderBottom: i < recentSessions.length - 1 ? `1px solid ${T.hairline}` : "none",
+                  cursor: "pointer",
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 13 }}>{started}</div>
+                    <div style={{ fontSize: 12, color: T.inkSubtle }}>{duration > 0 ? formatDuration(duration) : ""}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 15 }}>
+                      {fmtInUnit(v, vu)}
+                      <span style={{ fontSize: 11, color: T.inkSubtle, marginLeft: 3 }}>{vu.label}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: cls.tone === "danger" ? T.danger : cls.tone === "success" ? T.success : T.inkSubtle }}>
+                      {Number.isFinite(f) ? `${fmtInUnit(f, fu)} ${fu.label}` : ""}
+                    </div>
+                  </div>
+                  <span style={{ color: T.inkTertiary, fontSize: 18, flexShrink: 0 }}>›</span>
+                </div>
+              );
+            })}
+          </Tile>
+        )}
+      </div>
+      {openFullLink}
+    </div>
+    {openSession && (
+      <SessionDetailOverlay
+        session={openSession}
+        velocityUnit={vu}
+        flowUnit={fu}
+        onClose={() => setOpenSession(null)}
+      />
+    )}
+    </div>
+  );
+}
+
+/* Detalhe de uma medição arquivada: gráfico reconstruído das amostras,
+   estatísticas e os eventos de lavagem registrados no período. */
+function SessionDetailOverlay({ session, velocityUnit, flowUnit, onClose }) {
+  const vu = velocityUnit, fu = flowUnit;
+  const series = useMemo(() => sessionVelocitySeries(session), [session]);
+  const chartSeries = useMemo(
+    () => series.map(p => ({ ts: p.ts, velocityMpm: Math.abs(p.velocityMpm) * vu.factor })),
+    [series, vu]);
+  const area = session?.filter ? Number(session.filter.areaM2) : NaN;
+  const stats = useMemo(() => {
+    const vs = series.map(p => Math.abs(p.velocityMpm)).filter(Number.isFinite);
+    if (!vs.length) return null;
+    return {
+      avg: vs.reduce((a, b) => a + b, 0) / vs.length,
+      max: Math.max(...vs),
+      min: Math.min(...vs),
+    };
+  }, [series]);
+  const startMs = Date.parse(session?.startedAt || "") || 0;
+  const endMs = Date.parse(session?.endedAt || "") || startMs;
+  const washEntries = useMemo(() => {
+    const all = loadJson(STORAGE.washLog, []);
+    if (!Array.isArray(all) || !startMs) return [];
+    const lo = startMs - 60000, hi = endMs + 45 * 60000;
+    return all.filter(r => {
+      const t = Date.parse(r && r.receivedAt || "");
+      return Number.isFinite(t) && t >= lo && t <= hi;
+    }).slice(-40);
+  }, [session, startMs, endMs]);
+  const fmtDate = ms => new Date(ms).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const avgFlow = stats ? computeFlowFromVelocityLpm(area, stats.avg) : NaN;
+  return (
+    <div style={{
+      position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
+      background: T.surface1, display: "flex", flexDirection: "column",
+      // A action bar nativa cobre o topo da página (tema overlay); o conteúdo
+      // do app começa por baixo dela — o cabeçalho precisa desse recuo.
+      paddingTop: 80,
+    }}>
+      <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, background: T.canvas, borderBottom: `1px solid ${T.hairline}` }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500, fontSize: 15 }}>Medição {startMs ? fmtDate(startMs) : ""}</div>
+          <div style={{ fontSize: 12, color: T.inkSubtle }}>
+            {endMs > startMs ? `Duração ${formatDuration(endMs - startMs)}` : ""}
+            {session?.endReason ? ` · ${session.endReason === "wash_started" || session.endReason === "wash_detected" ? "encerrada por lavagem" : session.endReason}` : ""}
+          </div>
+        </div>
+        <button onClick={onClose} style={{ fontSize: 15, color: T.blue, padding: "8px 10px", flexShrink: 0 }}>Fechar</button>
+      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+        <Tile padding={0} style={{ overflow: "hidden" }}>
+          <div style={{ padding: "14px 16px", fontSize: 14, fontWeight: 500, borderBottom: `1px solid ${T.hairline}` }}>
+            Velocidade de subida ({vu.label})
+          </div>
+          <MinimalFlowChart history={chartSeries} />
+          {stats && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, padding: "10px 16px 14px", borderTop: `1px solid ${T.hairline}` }}>
+              {[
+                ["Média", fmtInUnit(stats.avg, vu)],
+                ["Máx", fmtInUnit(stats.max, vu)],
+                ["Mín", fmtInUnit(stats.min, vu)],
+                ["Vazão média", Number.isFinite(avgFlow) ? `${fmtInUnit(avgFlow, fu)} ${fu.label}` : "--"],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <div style={{ fontSize: 10, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase" }}>{label}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 14, marginTop: 2 }}>{value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Tile>
+
+        <Tile padding={0} style={{ overflow: "hidden" }}>
+          <div style={{ padding: "14px 16px", fontSize: 14, fontWeight: 500, borderBottom: `1px solid ${T.hairline}` }}>
+            Eventos registrados
+          </div>
+          {washEntries.length === 0 && (
+            <div style={{ padding: 16, fontSize: 13, color: T.inkSubtle }}>
+              Nenhum evento de lavagem no período desta medição.
+            </div>
+          )}
+          {washEntries.map((r, i) => {
+            const isWash = Number(r.type) !== 1;
+            const rateMpm = Number(r.aux) / 1000;   // mm/min → m/min
+            return (
+              <div key={i} style={{
+                padding: "12px 16px",
+                borderBottom: i < washEntries.length - 1 ? `1px solid ${T.hairline}` : "none",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>
+                    {isWash ? "Lavagem" : "Evento"}
+                  </span>
+                  <span style={{ fontSize: 12, color: T.inkSubtle, fontFamily: T.mono }}>
+                    {r.receivedAt ? fmtDate(Date.parse(r.receivedAt)) : ""}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: T.inkSubtle, marginTop: 4, fontFamily: T.mono }}>
+                  {isWash
+                    ? `nível ${(Number(r.beforeMm) / 10).toFixed(1)} → ${(Number(r.afterMm) / 10).toFixed(1)} cm` +
+                      (Number.isFinite(Number(r.events)) && Number(r.events) > 0 ? ` · ${r.events} evento(s)` :
+                       Number.isFinite(Number(r.count)) && Number(r.count) > 0 ? ` · ${r.count} evento(s)` : "") +
+                      (Number.isFinite(Number(r.aux)) && Number(r.aux) > 0 ? ` · ${formatDuration(Number(r.aux) * 1000)}` : "")
+                    : `nível ${(Number(r.beforeMm) / 10).toFixed(1)}–${(Number(r.afterMm) / 10).toFixed(1)} cm` +
+                      ` · ${fmtInUnit(rateMpm, vu)} ${vu.label}` +
+                      (Number.isFinite(Number(r.count)) ? ` · ${r.count} movimento(s)` : "")}
+                </div>
+              </div>
+            );
+          })}
+        </Tile>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const ble = useBLE();
 
@@ -1653,6 +2562,18 @@ function App() {
   const [flowReason, setFlowReason] = useState("Aguardando janela de 10s.");
   const [flowWaitSeconds, setFlowWaitSeconds] = useState(10);
   const [debugMode, setDebugMode] = useState(() => loadText(STORAGE.debugMode, "") === "1");
+  const [velocityUnitId, setVelocityUnitId] = useState(() => loadText(STORAGE.velocityUnit, "m_min"));
+  const [flowUnitId, setFlowUnitId] = useState(() => loadText(STORAGE.flowUnit, "l_min"));
+  const [minVelocity, setMinVelocity] = useState(() => {
+    const v = parseFloat(loadText(STORAGE.minVelocity, "0.25"));
+    return Number.isFinite(v) && v >= 0 ? v : 0.25;
+  });
+  const minVelocityRef = useRef(minVelocity);
+  useEffect(() => { minVelocityRef.current = minVelocity; saveText(STORAGE.minVelocity, String(minVelocity)); }, [minVelocity]);
+  useEffect(() => { saveText(STORAGE.velocityUnit, velocityUnitId); }, [velocityUnitId]);
+  useEffect(() => { saveText(STORAGE.flowUnit, flowUnitId); }, [flowUnitId]);
+  const velocityUnit = unitById(VELOCITY_UNITS, velocityUnitId);
+  const flowUnit = unitById(FLOW_UNITS, flowUnitId);
   const [debugInfo, setDebugInfo] = useState({});
   const [activeSessionMeta, setActiveSessionMeta] = useState(null);
   const [syncState, setSyncState] = useState(() => ({
@@ -1662,8 +2583,19 @@ function App() {
   const [pendingFilterChoice, setPendingFilterChoice] = useState(false);
   const [scanPaused, setScanPaused] = useState(false);
   const [connectionIssue, setConnectionIssue] = useState(null);
+  const [offlineBrowseMode, setOfflineBrowseMode] = useState(false);
+  const [sensorWarning, setSensorWarning] = useState(false);
+  const [minimalMode, setMinimalMode] = useState(() => loadText(STORAGE.minimalMode, "1") === "1");
+  const [guideStep, setGuideStep] = useState(() => new URLSearchParams(location.search).get("guide") === "1" ? 0 : null);
+  const [showGuideOnStartup, setShowGuideOnStartup] = useState(() => new URLSearchParams(location.search).get("guideOnStartup") === "1");
 
   const selectedFilter = useMemo(() => filters.find(f => f.id === selectedFilterId) || null, [filters, selectedFilterId]);
+  const minimalFilter = useMemo(() =>
+    filters.find(f => f.id === MINIMAL_FILTER_ID) || filters.find(MINIMAL_FILTER_MATCH) || null,
+    [filters]);
+  // Minimal mode always operates on the fixed Primavera Asc filter; the full
+  // app keeps whatever the user selected.
+  const effectiveFilter = minimalMode ? (minimalFilter || selectedFilter) : selectedFilter;
   const knownDeviceMap = useMemo(() => {
     const map = {};
     (Array.isArray(knownDevices) ? knownDevices : []).forEach(d => {
@@ -1695,6 +2627,7 @@ function App() {
   const restartReconnectNoPickerRef = useRef(false);
   const pendingRestartAfterReconnectRef = useRef(false);
   const pendingRestartAttemptsRef = useRef(0);
+  const sensorWarningTimerRef = useRef(null);
   const continueSessionAfterReconnectRef = useRef(false);
   const bleRef = useRef(ble);
   const selectedFilterRef = useRef(null);
@@ -1705,9 +2638,27 @@ function App() {
   const lastValidVelocityRef = useRef({ value: NaN, ts: 0 });
   const lastWindowVelocitySignRef = useRef(null);
 
+  const minimalModeRef = useRef(minimalMode);
+  const lastControlSeqRef = useRef(0);
+  const lastSandCmdRef = useRef(0);
+  const washSyncRef = useRef({ phase: "idle", records: [] });
+  // Lavagem em andamento (WL=WSTART … WL=EVT do firmware >= 1.5.0)
+  const [washActive, setWashActive] = useState(false);
+  const [washEventCount, setWashEventCount] = useState(0);
+  const washActiveRef = useRef(false);
+  // Último valor acima do limite de exibição: no modo simplificado os
+  // medidores seguram esse valor durante a lavagem e enquanto a janela de
+  // 10 s reabastece, em vez de mostrar traços.
+  const lastAboveThreshRef = useRef({ velocityMpm: NaN, flow10: NaN });
+  // Máx/Mín da velocidade em janelas de 5 s, acumulados na sessão atual
+  const flowStats5Ref = useRef({ max: NaN, min: NaN });
+  const [flowStats5, setFlowStats5] = useState({ max: NaN, min: NaN });
+
   useEffect(() => { bleRef.current = ble; }, [ble]);
+  useEffect(() => { washActiveRef.current = washActive; }, [washActive]);
   useEffect(() => { scanPausedRef.current = scanPaused; }, [scanPaused]);
-  useEffect(() => { selectedFilterRef.current = selectedFilter; }, [selectedFilter]);
+  useEffect(() => { minimalModeRef.current = minimalMode; saveText(STORAGE.minimalMode, minimalMode ? "1" : "0"); }, [minimalMode]);
+  useEffect(() => { selectedFilterRef.current = effectiveFilter; }, [effectiveFilter]);
   useEffect(() => { saveJson(STORAGE.filters, filters); }, [filters]);
   useEffect(() => { if (selectedFilterId) saveText(STORAGE.selectedFilterId, selectedFilterId); }, [selectedFilterId]);
   useEffect(() => { saveJson(STORAGE.knownDevices, knownDevices); }, [knownDevices]);
@@ -1726,6 +2677,8 @@ function App() {
     flowWindowStartMsRef.current = Date.now();
     lastValidVelocityRef.current = { value: NaN, ts: 0 };
     lastWindowVelocitySignRef.current = null;
+    flowStats5Ref.current = { max: NaN, min: NaN };
+    setFlowStats5({ max: NaN, min: NaN });
   }, []);
 
   const persistActiveSession = useCallback((force = false) => {
@@ -1750,6 +2703,8 @@ function App() {
     filteredSamplesRef.current = []; lastInstantUpdateRef.current = 0; sessionStartRef.current = null; flowWindowStartMsRef.current = 0;
     lastValidVelocityRef.current = { value: NaN, ts: 0 };
     lastWindowVelocitySignRef.current = null;
+    flowStats5Ref.current = { max: NaN, min: NaN };
+    setFlowStats5({ max: NaN, min: NaN });
     try { localStorage.removeItem(STORAGE.activeSession); } catch (_) {}
   }, [serverUrl]);
 
@@ -1882,13 +2837,82 @@ function App() {
       ageMs <= 30000;
   }, []);
 
+  const guideActive = Number.isInteger(guideStep);
+  const demoHistory = useMemo(() => {
+    const end = Date.now();
+    const values = [0.18, 0.31, 0.46, 0.62, 0.78, 0.84, 0.79, 0.88, 0.82];
+    return values.map((velocityMpm, index) => ({ ts: end - (values.length - 1 - index) * 10000, velocityMpm }));
+  }, []);
   const appBle = useMemo(() => ({
     ...ble,
+    ...(guideActive ? {
+      connected: true,
+      connectionStatus: "Connected",
+      deviceName: "FilterTrackV3 · demonstração",
+      deviceAddress: "DE:MO:00:00:00:01",
+      rssi: -54,
+      errorMsg: "",
+      lastData: { distance: 31.42, timestamp: Date.now() },
+      sendCommand: () => true,
+    } : {}),
     startScan: requestScan,
     stopScan: pauseScan,
     disconnect: disconnectFromUi,
-  }), [ble, requestScan, pauseScan, disconnectFromUi]);
+  }), [ble, guideActive, requestScan, pauseScan, disconnectFromUi]);
 
+  const startInitialGuide = useCallback(() => {
+    setMinimalMode(true);
+    setTab("monitor");
+    setGuideStep(0);
+  }, []);
+
+  useEffect(() => {
+    window.FilterTrackStartGuide = startInitialGuide;
+    if (window.__filterTrackGuideRequested) startInitialGuide();
+    return () => { if (window.FilterTrackStartGuide === startInitialGuide) delete window.FilterTrackStartGuide; };
+  }, [startInitialGuide]);
+
+  useEffect(() => {
+    appBle.setInitialGuideActive?.(guideActive);
+    appBle.setGuideDataButtonsVisible?.(!guideActive || guideStep === 8);
+  }, [guideActive, guideStep]);
+
+  const changeGuideStartupPreference = useCallback((show) => {
+    setShowGuideOnStartup(!!show);
+    appBle.setGuideStartupPreference?.(!!show);
+  }, [appBle]);
+
+  const skipInitialGuide = useCallback((showNextTime = false) => {
+    setMinimalMode(true);
+    setTab("monitor");
+    setGuideStep(null);
+    setShowGuideOnStartup(!!showNextTime);
+    appBle.completeInitialGuide?.(!!showNextTime);
+  }, [appBle]);
+
+  const advanceInitialGuide = useCallback(() => {
+    setGuideStep(step => Number.isInteger(step) ? Math.min(step + 1, INITIAL_GUIDE_STEPS.length - 1) : step);
+  }, []);
+
+  const openFullMode = useCallback(() => {
+    setMinimalMode(false);
+    setTab("monitor");
+    if (guideStep === 4) setGuideStep(5);
+  }, [guideStep]);
+
+  const changeTab = useCallback((nextTab) => {
+    setTab(nextTab);
+    if (guideStep === 6 && nextTab === "settings") {
+      setGuideStep(7);
+      setTimeout(() => document.querySelector('[data-guide="settings-minimal"]')?.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+    }
+  }, [guideStep]);
+
+  const enterMinimalMode = useCallback(() => {
+    setMinimalMode(true);
+    setTab("monitor");
+    if (guideStep === 7) setGuideStep(8);
+  }, [guideStep]);
   useEffect(() => {
     if (startupDoneRef.current) return; startupDoneRef.current = true;
     const orphan = loadJson(STORAGE.activeSession, null);
@@ -1901,14 +2925,14 @@ function App() {
   }, [serverUrl]);
 
   useEffect(() => {
-    if (ble.connected || ble.scanning || scanPaused || ble.connectionStatus === "Connecting") return;
+    if (guideActive || ble.connected || ble.scanning || scanPaused || ble.connectionStatus === "Connecting") return;
     const id = setTimeout(() => {
       if (!scanPausedRef.current && !bleRef.current.connected && !bleRef.current.scanning) {
         bleRef.current.startScan?.();
       }
     }, 900);
     return () => clearTimeout(id);
-  }, [ble.connected, ble.scanning, ble.connectionStatus, scanPaused]);
+  }, [guideActive, ble.connected, ble.scanning, ble.connectionStatus, scanPaused]);
 
   useEffect(() => {
     if (manualDeviceChoice || ble.connected || ble.connectionStatus === "Connecting" || !autoConnectDevice) return;
@@ -1934,7 +2958,7 @@ function App() {
         continueSessionAfterReconnectRef.current = false;
         const session = activeSessionRef.current;
         session.device = { name: ble.deviceName || session.device?.name || "Dispositivo", address: ble.deviceAddress || session.device?.address || "unknown" };
-        session.filter = selectedFilter ? { ...selectedFilter } : session.filter;
+        session.filter = effectiveFilter ? { ...effectiveFilter } : session.filter;
         const startedAtMs = Number.isFinite(Date.parse(session.startedAt)) ? Date.parse(session.startedAt) : Date.now();
         setActiveSessionMeta({ id: session.id, startedAtMs, samples: session.samples });
         setPendingFilterChoice(false);
@@ -1945,14 +2969,14 @@ function App() {
         const session = {
           id: uid("session"), startedAt: nowIso(),
           device: { name: ble.deviceName || "Dispositivo", address: ble.deviceAddress || "unknown" },
-          filter: selectedFilter ? { ...selectedFilter } : null,
+          filter: effectiveFilter ? { ...effectiveFilter } : null,
           samples: createSampleSeries(),
         };
         activeSessionRef.current = session;
         setActiveSessionMeta({ id: session.id, startedAtMs: Date.now(), samples: session.samples });
         resetFlowMetrics("Coletando dados.");
         processedSampleTsRef.current = 0;
-        setPendingFilterChoice(!skipFilterChoice);
+        setPendingFilterChoice(!skipFilterChoice && !minimalModeRef.current);
         persistActiveSession(true);
       } else {
         setPendingFilterChoice(false);
@@ -1987,7 +3011,7 @@ function App() {
       }
       scanPausedRef.current = false;
       setScanPaused(false);
-      if (!manualDisconnect && !suppressIssue) {
+      if (!manualDisconnect && !suppressIssue && !minimalModeRef.current) {
         setConnectionIssue({
           type: "connection_lost",
           title: "Conexão perdida",
@@ -1998,7 +3022,7 @@ function App() {
       }
     }
     prevConnectedRef.current = nowConnected;
-  }, [ble.connected, ble.deviceAddress, ble.deviceName, selectedFilter, finalizeSession, persistActiveSession, resetFlowMetrics, schedulePendingRestartCommand, canContinueInterruptedSession]);
+  }, [ble.connected, ble.deviceAddress, ble.deviceName, effectiveFilter, finalizeSession, persistActiveSession, resetFlowMetrics, schedulePendingRestartCommand, canContinueInterruptedSession]);
 
   useEffect(() => {
     const message = String(ble.errorMsg || "");
@@ -2016,10 +3040,10 @@ function App() {
 
   useEffect(() => {
     if (activeSessionRef.current) {
-      activeSessionRef.current.filter = selectedFilter ? { ...selectedFilter } : null;
+      activeSessionRef.current.filter = effectiveFilter ? { ...effectiveFilter } : null;
       persistActiveSession(false);
     }
-  }, [selectedFilter, persistActiveSession]);
+  }, [effectiveFilter, persistActiveSession]);
 
   useEffect(() => {
     const active = activeSessionRef.current;
@@ -2031,10 +3055,10 @@ function App() {
     newSamples.forEach(s => { series = appendSample(series, s.ts, s.distance); processedSampleTsRef.current = Math.max(processedSampleTsRef.current, s.ts); });
     active.samples = series;
     active.device = { name: ble.deviceName || active.device?.name || "", address: ble.deviceAddress || active.device?.address || "" };
-    active.filter = selectedFilter ? { ...selectedFilter } : null;
+    active.filter = effectiveFilter ? { ...effectiveFilter } : null;
     if (activeSessionMeta) setActiveSessionMeta(m => m ? { ...m, samples: series } : m);
     persistActiveSession(false);
-  }, [ble.connected, ble.deviceAddress, ble.deviceName, ble.distanceSamples, selectedFilter, activeSessionMeta, persistActiveSession]);
+  }, [ble.connected, ble.deviceAddress, ble.deviceName, ble.distanceSamples, effectiveFilter, activeSessionMeta, persistActiveSession]);
 
   useEffect(() => {
     const tick = () => {
@@ -2085,10 +3109,73 @@ function App() {
       if (!sessionStartRef.current) sessionStartRef.current = filteredSample;
       const motion = computeWaterMotion(buf, 10000, now);
       const velocityMpm = Number.isFinite(motion.velocityMPerMin) ? motion.velocityMPerMin : NaN;
+      // Máx/Mín pedidos em janela de 5 s: roda uma janela curta em paralelo à
+      // janela de 10 s usada no valor principal.
+      const motion5 = computeWaterMotion(buf, 5000, now);
+      const vel5 = Number.isFinite(motion5.velocityMPerMin) ? Math.abs(motion5.velocityMPerMin) : NaN;
+      if (Number.isFinite(vel5) && vel5 >= minVelocityRef.current) {
+        const cur = flowStats5Ref.current;
+        const next = {
+          max: Number.isFinite(cur.max) ? Math.max(cur.max, vel5) : vel5,
+          min: Number.isFinite(cur.min) ? Math.min(cur.min, vel5) : vel5,
+        };
+        if (next.max !== cur.max || next.min !== cur.min) {
+          flowStats5Ref.current = next;
+          setFlowStats5(next);
+        }
+      }
       const flow10 = computeFlowFromVelocityLpm(areaM2, velocityMpm);
       const motionReason = motion.reason || (Number.isFinite(velocityMpm) ? "Janela de 10s valida." : "Aguardando janela de 10s.");
+      const minimal = minimalModeRef.current;
+      const washing = minimal && washActiveRef.current;
+      // Modo simplificado: enquanto o sensor entrega leituras válidas os
+      // medidores nunca mostram traços — seguram o último valor acima do
+      // limite (ou 0.00 se ainda não houve nenhum).
+      const holdTiles = () => {
+        const held = lastAboveThreshRef.current;
+        setFlowVelocity(Number.isFinite(held.velocityMpm) ? held.velocityMpm : 0);
+        setFlowInstant(Number.isFinite(held.flow10) ? held.flow10 : computeFlowFromVelocityLpm(areaM2, 0));
+        setFlowWaitSeconds(0);
+      };
       if (!Number.isFinite(velocityMpm)) {
-        unavailable(motionReason);
+        if (minimal) {
+          holdTiles();
+          setFlowReason(washing ? "Lavagem em andamento." : motionReason);
+        } else {
+          unavailable(motionReason);
+        }
+      } else if (washing) {
+        // Lavagem (modo simplificado): o gráfico acompanha o nível desde o
+        // início da lavagem e registra todos os eventos — sem reset por
+        // inversão e sem corte pelo limite de exibição. Os medidores ficam
+        // congelados no último valor acima do limite.
+        if (now - lastInstantUpdateRef.current >= 2000) {
+          setFlowHistory(prev => [...prev, { ts: now, velocityMpm: round(velocityMpm, 4), flow10 }]);
+          lastInstantUpdateRef.current = now;
+        }
+        holdTiles();
+        setFlowReason("Lavagem em andamento.");
+      } else if (Math.abs(velocityMpm) < minVelocityRef.current) {
+        // Abaixo do limite de exibição (ajustável): valores residuais tipo
+        // 0.01 m/min são ruído.
+        if (minimal) {
+          // Simplificado: mostra 0.00 e leva o gráfico a 0.00.
+          if (now - lastInstantUpdateRef.current >= 10000) {
+            setFlowHistory(prev => [...prev, { ts: now, velocityMpm: 0, flow10: computeFlowFromVelocityLpm(areaM2, 0) }]);
+            lastInstantUpdateRef.current = now;
+            // Passar pelo zero não conta como inversão de fluxo.
+            lastWindowVelocitySignRef.current = null;
+          }
+          setFlowVelocity(0);
+          setFlowInstant(computeFlowFromVelocityLpm(areaM2, 0));
+        } else {
+          // App completo: não mostra, não entra no gráfico.
+          setFlowVelocity(NaN);
+          setFlowInstant(NaN);
+        }
+        setFlowWaitSeconds(0);
+        setFlowReason("Sem filtração ativa.");
+        lastValidVelocityRef.current = { value: NaN, ts: now };
       } else if (now - lastInstantUpdateRef.current >= 10000) {
         const currentVelocitySign = Math.sign(velocityMpm);
         let flowInverted = false;
@@ -2108,6 +3195,7 @@ function App() {
         setFlowInstant(flow10);
         setFlowReason(motionReason);
         lastValidVelocityRef.current = { value: velocityMpm, ts: now };
+        lastAboveThreshRef.current = { velocityMpm, flow10 };
         lastInstantUpdateRef.current = now;
       }
       setDebugInfo({
@@ -2131,11 +3219,223 @@ function App() {
     window.addEventListener("beforeunload", onBU); return () => window.removeEventListener("beforeunload", onBU);
   }, [persistActiveSession]);
 
+  // ── Minimal mode: firmware control messages ──────────────────────────
+  // Sand mode is enforced (command 5) and the firmware wash log is pulled
+  // and acknowledged silently. Wash events close the current session and
+  // open the next one, so sessions follow the firmware's wash detection.
+  useEffect(() => {
+    const log = Array.isArray(ble.controlLog) ? ble.controlLog : [];
+    const fresh = log.filter(e => e && e.seq > lastControlSeqRef.current);
+    if (!fresh.length) return;
+    lastControlSeqRef.current = fresh[fresh.length - 1].seq;
+    const sync = washSyncRef.current;
+    fresh.forEach(({ msg }) => {
+      if (msg.startsWith("SAND=")) {
+        if (minimalModeRef.current && msg === "SAND=0" && bleRef.current.connected) {
+          const now = Date.now();
+          if (now - lastSandCmdRef.current > SAND_MODE_REASSERT_MS) {
+            lastSandCmdRef.current = now;
+            bleRef.current.sendCommand?.("5");
+          }
+        }
+        return;
+      }
+      if (msg === "WL=WSTART") {
+        // Desvio do baseline detectado: o processo de filtração atual acabou.
+        // A sessão fecha aqui; a próxima abre quando a lavagem terminar (WL=EVT).
+        setWashActive(true);
+        washActiveRef.current = true;
+        setWashEventCount(0);
+        if (minimalModeRef.current) {
+          finalizeSession("wash_started");
+          // O gráfico recomeça aqui e acompanha a lavagem inteira; os
+          // medidores seguram o último valor acima do limite em vez dos
+          // traços que o finalizeSession deixaria.
+          const held = lastAboveThreshRef.current;
+          setFlowVelocity(Number.isFinite(held.velocityMpm) ? held.velocityMpm : 0);
+          setFlowInstant(held.flow10);
+          setFlowWaitSeconds(0);
+          setFlowReason("Lavagem em andamento.");
+        }
+        return;
+      }
+      if (msg.startsWith("WL=WEVT,")) {
+        // Evento agregado gravado durante a lavagem (min,max,vazão,excursões).
+        setWashEventCount(c => c + 1);
+        return;
+      }
+      if (msg.startsWith("WL=EVT,")) {
+        const p = msg.slice(7).split(",");
+        appendWashLog([{
+          boot: -1, uptimeS: -1, type: 0,
+          beforeMm: Number(p[0]), afterMm: Number(p[1]),
+          events: Number(p[2]) || 0, receivedAt: nowIso(), live: true,
+        }]);
+        setWashActive(false);
+        washActiveRef.current = false;
+        if (minimalModeRef.current) {
+          finalizeSession("wash_detected");
+          if (bleRef.current.connected) startNewSession();
+        }
+        return;
+      }
+      if (msg.startsWith("WL=CNT,")) {
+        const n = Number(msg.slice(7).split(",")[0]) || 0;
+        if (sync.phase === "count") {
+          if (n > 0) { sync.phase = "reading"; sync.records = []; bleRef.current.sendCommand?.("LOG:READ"); }
+          else sync.phase = "idle";
+        }
+        // While "reading", the dump re-announces the count — nothing to do.
+        return;
+      }
+      if (msg.startsWith("WL=R,")) {
+        if (sync.phase === "reading") {
+          const p = msg.slice(5).split(",");
+          if (p.length >= 7) {
+            // v2: boot,uptime,type,a,b,count,aux (type 0=lavagem, 1=evento)
+            sync.records.push({
+              boot: Number(p[0]), uptimeS: Number(p[1]), type: Number(p[2]),
+              beforeMm: Number(p[3]), afterMm: Number(p[4]),
+              count: Number(p[5]), aux: Number(p[6]), receivedAt: nowIso(),
+            });
+          } else if (p.length >= 4) {
+            sync.records.push({ boot: Number(p[0]), uptimeS: Number(p[1]), type: 0, beforeMm: Number(p[2]), afterMm: Number(p[3]), receivedAt: nowIso() });
+          }
+        }
+        return;
+      }
+      if (msg === "WL=END") {
+        if (sync.phase === "reading") {
+          appendWashLog(sync.records);
+          sync.phase = "ack";
+          bleRef.current.sendCommand?.(`LOG:ACK:${sync.records.length}`);
+        }
+        return;
+      }
+      if (msg === "WL=CLR" || msg.startsWith("WL=ERR")) {
+        sync.phase = "idle";
+        sync.records = [];
+      }
+    });
+  }, [ble.controlLog, finalizeSession, startNewSession]);
+
+  useEffect(() => {
+    // Segurança: o firmware encerra a lavagem à força em 30 min; se o WL=EVT
+    // se perder (desconexão), o banner não pode ficar preso.
+    if (!washActive) return;
+    const t = setTimeout(() => setWashActive(false), 35 * 60 * 1000);
+    return () => clearTimeout(t);
+  }, [washActive]);
+
+  useEffect(() => {
+    if (!ble.connected) setWashActive(false);
+  }, [ble.connected]);
+
+  useEffect(() => {
+    if (!minimalMode || !ble.connected) return;
+    washSyncRef.current = { phase: "idle", records: [] };
+    const sandTimer = setTimeout(() => {
+      if (!bleRef.current.connected) return;
+      lastSandCmdRef.current = Date.now();
+      bleRef.current.sendCommand?.("5");
+    }, 1500);
+    const logTimer = setTimeout(() => {
+      if (!bleRef.current.connected || washSyncRef.current.phase !== "idle") return;
+      washSyncRef.current.phase = "count";
+      bleRef.current.sendCommand?.("LOG:COUNT");
+    }, 4000);
+    return () => { clearTimeout(sandTimer); clearTimeout(logTimer); };
+  }, [minimalMode, ble.connected]);
+
+  const minimalRecentSessions = useMemo(() => {
+    if (!minimalMode || !effectiveFilter) return [];
+    const a = loadJson(STORAGE.sessionArchive, []);
+    const list = Array.isArray(a) ? a : [];
+    const sameFilter = s => s && s.filter && (
+      s.filter.id === effectiveFilter.id ||
+      (s.filter.station === effectiveFilter.station && s.filter.name === effectiveFilter.name)
+    );
+    return list.filter(sameFilter).slice(-8).reverse();
+  }, [minimalMode, effectiveFilter, syncState, activeSessionMeta]);
+
   const handleSync = useCallback(() => { syncSessions(serverUrl, setSyncState, "manual"); }, [serverUrl]);
+  useEffect(() => {
+    if (ble.connected) setOfflineBrowseMode(false);
+  }, [ble.connected]);
+
+  const showSensorRequiredWarning = useCallback(() => {
+    setSensorWarning(true);
+    clearTimeout(sensorWarningTimerRef.current);
+    sensorWarningTimerRef.current = setTimeout(() => setSensorWarning(false), 3500);
+  }, []);
+
+  const handleSensorOnlyInteraction = useCallback((event) => {
+    if (!offlineBrowseMode) return;
+    const control = event.target?.closest?.("button,input,select,textarea");
+    const target = control?.closest?.('[data-requires-sensor="true"]');
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    showSensorRequiredWarning();
+  }, [offlineBrowseMode, showSensorRequiredWarning]);
+
+  const enterWithoutSensor = useCallback(() => {
+    pauseScan();
+    setOfflineBrowseMode(true);
+    setTab("monitor");
+    setConnectionIssue(null);
+  }, [pauseScan]);
+
+  const returnToSensorConnection = useCallback(() => {
+    setOfflineBrowseMode(false);
+    setScanPaused(false);
+    setTimeout(() => requestScan(), 50);
+  }, [requestScan]);
 
   const tabTitle = { monitor: "Monitor", sessions: "Sessões", filters: "Filtros", settings: "Ajustes" };
+  const viewBle = offlineBrowseMode ? {
+    ...appBle,
+    connected: false,
+    connectionStatus: "Offline",
+    deviceName: "Sem sensor",
+    deviceAddress: "Modo de consulta",
+    rssi: -100,
+  } : appBle;
+  const guideFilter = minimalFilter || selectedFilter || filters[0] || null;
+  const displayedFilter = guideActive ? guideFilter : selectedFilter;
+  const displayedVelocity = guideActive ? 0.84 : flowVelocity;
+  const displayedFlow = guideActive ? 2646 : flowInstant;
+  const displayedHistory = guideActive ? demoHistory : flowHistory;
+  const displayedReason = guideActive ? "Dados simulados para o guia." : flowReason;
+  const displayedWait = guideActive ? 0 : flowWaitSeconds;
+  const displayedStats = guideActive ? { min: 0.18, max: 0.88 } : flowStats5;
 
-  if (!ble.connected) {
+  if (minimalMode) {
+    return (
+      <>
+      <MinimalScreen
+        ble={appBle}
+        filter={guideActive ? guideFilter : effectiveFilter}
+        flowVelocity={displayedVelocity}
+        flowInstant={displayedFlow}
+        flowHistory={displayedHistory}
+        flowReason={displayedReason}
+        flowWaitSeconds={displayedWait}
+        recentSessions={minimalRecentSessions}
+        washActive={washActive}
+        washEvents={washEventCount}
+        flowStats={displayedStats}
+        velocityUnit={velocityUnit}
+        flowUnit={flowUnit}
+        onOpenFull={openFullMode}
+        onDisconnect={appBle.disconnect}
+      />
+        <InitialGuide step={guideStep} onNext={advanceInitialGuide} onSkip={skipInitialGuide} />
+      </>
+    );
+  }
+
+  if (!appBle.connected && !offlineBrowseMode) {
     return (
       <>
         <ConnectScreen
@@ -2144,6 +3444,7 @@ function App() {
           isPreferredDevice={d => isKnownDevice(d, knownDeviceMap)}
           scanPaused={scanPaused}
           manualDeviceChoice={manualDeviceChoice}
+          onEnterWithoutSensor={enterWithoutSensor}
         />
         <ConnectionIssueDialog
           issue={connectionIssue}
@@ -2156,18 +3457,28 @@ function App() {
   }
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <>
+    <div onPointerDownCapture={handleSensorOnlyInteraction} onClickCapture={handleSensorOnlyInteraction} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <AppHeader
         title={tabTitle[tab]}
-        subtitle={tab === "monitor" && selectedFilter ? selectedFilter.station : "Cagece · Saneamento"}
-      />
+        subtitle={tab === "monitor" && displayedFilter ? displayedFilter.station : "Monitoramento de filtros"}
+      />      {offlineBrowseMode && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "#fcf4d6", borderBottom: "1px solid #f1c21b", color: "#684e00", flexShrink: 0 }}>
+          <span style={{ fontSize: 18, fontWeight: 700 }}>!</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Modo sem sensor</div>
+            <div style={{ fontSize: 12 }}>Consulta disponível; medições e comandos estão bloqueados.</div>
+          </div>
+          <button onClick={returnToSensorConnection} style={{ color: T.blue, fontSize: 13, fontWeight: 600, padding: 6 }}>Conectar</button>
+        </div>
+      )}
       <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {tab === "monitor" && (
           <MonitorTab
-            ble={appBle} filter={selectedFilter}
-            flowVelocity={flowVelocity} flowInstant={flowInstant}
-            flowHistory={flowHistory} flowReason={flowReason}
-            flowWaitSeconds={flowWaitSeconds}
+            ble={viewBle} filter={displayedFilter}
+            flowVelocity={displayedVelocity} flowInstant={displayedFlow}
+            flowHistory={displayedHistory} flowReason={displayedReason}
+            flowWaitSeconds={displayedWait}
             activeSessionMeta={activeSessionMeta}
             onPickFilter={() => setPicking(true)}
             onStartSession={handleSessionToggle}
@@ -2177,13 +3488,20 @@ function App() {
         {tab === "filters" && <FiltersTab filters={filters} onPick={f => { setSelectedFilterId(f.id); setPendingFilterChoice(false); setTab("monitor"); }} />}
         {tab === "settings" && (
           <SettingsTab
-            serverUrl={serverUrl} setServerUrl={setServerUrl} ble={appBle}
+            serverUrl={serverUrl} setServerUrl={setServerUrl} ble={viewBle}
             activeSessionMeta={activeSessionMeta}
             onEndSession={(reason, forceSave) => finalizeSession(reason, forceSave)}
             onRestartSensor={restartSensorCommand}
             debugMode={debugMode}
             setDebugMode={setDebugMode}
             debugInfo={debugInfo}
+            onEnterMinimal={enterMinimalMode}
+            onStartGuide={startInitialGuide}
+            showGuideOnStartup={showGuideOnStartup}
+            onShowGuideOnStartupChange={changeGuideStartupPreference}
+            velocityUnitId={velocityUnitId} setVelocityUnitId={setVelocityUnitId}
+            flowUnitId={flowUnitId} setFlowUnitId={setFlowUnitId}
+            minVelocity={minVelocity} setMinVelocity={setMinVelocity}
           />
         )}
         {(picking || (tab === "monitor" && ble.connected && pendingFilterChoice)) && (
@@ -2194,7 +3512,7 @@ function App() {
           />
         )}
       </div>
-      <BottomTabs tab={tab} onChange={setTab} onOpenData={appBle.openBiDashboard} />
+      <BottomTabs tab={tab} onChange={changeTab} onOpenData={appBle.openBiDashboard} />
       <ConnectionIssueDialog
         issue={connectionIssue}
         onRestartDevice={handleIssueRestartDevice}
@@ -2202,6 +3520,12 @@ function App() {
         onRestartApp={restartApp}
       />
     </div>
+    {sensorWarning && (
+      <div role="alert" style={{ position: "fixed", left: 16, right: 16, bottom: 82, zIndex: 9000, maxWidth: 520, margin: "0 auto", padding: "14px 16px", background: "#161616", color: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,.3)", fontSize: 14 }}>
+        Este recurso precisa de um sensor conectado. Toque em “Conectar” no aviso amarelo.
+      </div>
+    )}    <InitialGuide step={guideStep} onNext={advanceInitialGuide} onSkip={skipInitialGuide} />
+    </>
   );
 }
 

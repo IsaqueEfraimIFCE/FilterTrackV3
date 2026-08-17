@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FilterTrack - Master Project Documentation</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 15mm 20mm 15mm;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    line-height: 1.5;
+    font-size: 10.5pt;
+    padding: 0;
+    margin: 0;
+  }
+  h1 {
+    color: #0f172a;
+    font-size: 22pt;
+    border-bottom: 2px solid #0284c7;
+    padding-bottom: 6px;
+    margin-top: 0;
+    page-break-before: avoid;
+  }
+  h2 {
+    color: #0369a1;
+    font-size: 14pt;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 4px;
+    margin-top: 22px;
+    page-break-after: avoid;
+  }
+  h3 {
+    color: #0f172a;
+    font-size: 12pt;
+    margin-top: 16px;
+    page-break-after: avoid;
+  }
+  h4 {
+    color: #334155;
+    font-size: 10.5pt;
+    margin-top: 12px;
+    page-break-after: avoid;
+  }
+  p {
+    margin: 5px 0;
+  }
+  blockquote {
+    background: #f1f5f9;
+    border-left: 4px solid #0284c7;
+    margin: 10px 0;
+    padding: 8px 14px;
+    color: #334155;
+    font-style: italic;
+  }
+  .callout.warning {
+    background: #fffbebf8;
+    border: 1px solid #fde68a;
+    border-left: 5px solid #f59e0b;
+    padding: 12px 16px;
+    margin: 14px 0;
+    border-radius: 4px;
+    color: #92400e;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 9pt;
+    page-break-inside: avoid;
+  }
+  th, td {
+    border: 1px solid #cbd5e1;
+    padding: 6px 9px;
+    text-align: left;
+  }
+  th {
+    background-color: #f8fafc;
+    color: #0f172a;
+    font-weight: 600;
+  }
+  tr:nth-child(even) {
+    background-color: #f8fafc;
+  }
+  pre {
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 12px;
+    border-radius: 6px;
+    font-family: "Cascadia Code", Consolas, Monaco, monospace;
+    font-size: 8.5pt;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    page-break-inside: avoid;
+  }
+  code {
+    font-family: Consolas, Monaco, monospace;
+    background: #f1f5f9;
+    color: #0f172a;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 9pt;
+  }
+  pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    margin: 18px 0;
+  }
+  a {
+    color: #0284c7;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+<h1>FilterTrack - Master Project Documentation</h1>
+<blockquote><strong>Single Source of Truth</strong> for the FilterTrack Water Flow Monitoring System</blockquote>
+<blockquote><strong>Primary Microcontroller:</strong> ESP32-C6</blockquote>
+<blockquote><strong>Document Status:</strong> Complete &amp; Authoritative</blockquote>
+<br/>
+<hr/>
+<br/>
+<h2>1. Executive Summary &amp; System Overview</h2>
+<br/>
+<p><strong>FilterTrack</strong> is an end-to-end industrial IoT solution engineered for real-time water level and flow monitoring during sand-filter backwash operations at water treatment facilities (such as <strong>Cagece</strong>).</p>
+<br/>
+<p>The system measures the rate of rise and fall of water levels inside filtration basins using an ultrasonic sensor backed by accelerometer-based tilt correction. Technicians capture field measurements using a custom Android mobile application connected via Bluetooth Low Energy (BLE). The mobile app processes real-time sensor streams, computes flow metrics, manages local measurement sessions, and syncs data to a cloud-hosted FastAPI backend with an integrated Business Intelligence (BI) dashboard.</p>
+<br/>
+<pre><code class="">       +-------------------------------------------------------------+
+       |                  Physical Filter Basin                      |
+       |  +-------------------------------------------------------+  |
+       |  | 3D Enclosure (Case + Lid + Lock)                      |  |
+       |  |  +-------------------------------------------------+  |  |
+       |  |  | PCB (router.pdf layout)                         |  |  |
+       |  |  |  - ESP32-C6 Microcontroller (ESP-IDF 5.5)      |  |  |
+       |  |  |  - Waterproof Ultrasonic (AJ-SR04M / GPIO0,1)  |  |  |
+       |  |  |  - Accelerometer LSM303 (I2C SDA/SCL)          |  |  |
+       |  |  |  - Status LEDs (Yellow, Red, Green)            |  |  |
+       |  |  +-------------------------------------------------+  |  |
+       |  +-------------------------------------------------------+  |
+       +------------------------------|------------------------------+
+                                      | BLE (0x00FF / 0xFF01)
+                                      v
+       +-------------------------------------------------------------+
+       |                  Android Field Mobile App                   |
+       | - Executable: app-release.apk (~2.26 MB)                    |
+       | - Native Kotlin Shell (BLEManager + JavaScript Bridge)        |
+       | - WebView React UI (Minimal Sand-Filter UI + Full Tabs)     |
+       | - Real-time Velocity (m/min), Flow (L/min / m³/h) &amp; Wash Banner|
+       +------------------------------|------------------------------+
+                                      | HTTPS Sync (POST /sessions)
+                                      v
+       +-------------------------------------------------------------+
+       |             Cloud Infrastructure (Fly.io - `gru`)           |
+       | - FastAPI Backend (`https://filtertrack-api.fly.dev`)         |
+       | - Persistent SQLite Database on Fly Volume (`/data`)        |
+       | - Business Intelligence Dashboard (`/bi`)                   |
+       +-------------------------------------------------------------+</code></pre>
+<br/>
+<hr/>
+<br/>
+<h2>2. Hardware Architecture &amp; Main Microcontroller (ESP32-C6)</h2>
+<br/>
+<p>The definitive primary microcontroller for FilterTrack is the <strong>Espressif ESP32-C6</strong> (32-bit RISC-V single-core CPU up to 160 MHz, 4 MB Flash, supporting 2.4 GHz Wi-Fi 6, BLE 5.0, and 802.15.4 Thread/Zigbee).</p>
+<br/>
+<h3>2.1 Hardware Connections &amp; Pinout</h<h3>
+<br/>
+<p>The ESP32-C6 carrier board interfaces with the ultrasonic transducer, tilt accelerometer, status LEDs, and power supply according to the following GPIO configuration:</p>
+<br/>
+<table>
+<thead><tr><th>Peripheral / Component</th><th>Function</th><th>ESP32-C6 GPIO</th><th>Technical Description</th></tr></thead>
+<tbody>
+<tr><td><strong>Ultrasonic Sensor (AJ-SR04M)</strong></td><td><strong>Trigger</strong></td><td><code>GPIO1</code></td><td>Output pulse (~10µs) to initiate measurement</td></tr>
+<tr><td><strong>Ultrasonic Sensor (AJ-SR04M)</strong></td><td><strong>Echo</strong></td><td><code>GPIO0</code></td><td>Input pulse width proportional to target distance</td></tr>
+<tr><td><strong>Status LED - Yellow</strong></td><td><strong>Low-Power</strong></td><td><code>GPIO2</code></td><td>High when ESP32-C6 is in low-power standby mode</td></tr>
+<tr><td><strong>Status LED - Red</strong></td><td><strong>Error / Adv</strong></td><td><code>GPIO3</code></td><td>Blinks when advertising/disconnected; Solid on error</td></tr>
+<tr><td><strong>Status LED - Green</strong></td><td><strong>BLE Connected</strong></td><td><code>GPIO4</code></td><td>Solid high when BLE GATT client (Android) is connected</td></tr>
+<tr><td><strong>Accelerometer (LSM303DLHC)</strong></td><td><strong>I2C SDA</strong></td><td><code>GPIO13</code></td><td>I2C Data line for 3-axis accelerometer / magnetometer</td></tr>
+<tr><td><strong>Accelerometer (LSM303DLHC)</strong></td><td><strong>I2C SCL</strong></td><td><code>GPIO12</code></td><td>I2C Clock line for 3-axis accelerometer / magnetometer</td></tr>
+<tr><td><strong>Sensor Power Control</strong></td><td><strong>Power Enable</strong></td><td><em>Disabled</em></td><td><code>SENSOR_PWR_ENABLED 0</code> (direct continuous rail)</td></tr>
+</tbody></table>
+<br/>
+<div class="callout warning"><strong>WARNING:</strong><p><strong>ESP32-C6 Native USB Pin Conflict Notice (GPIO12 / GPIO13):</strong><br/>On the ESP32-C6 silicon, <strong>GPIO12 (D-)</strong> and <strong>GPIO13 (D+)</strong> are hardwired to the native USB-Serial/JTAG controller. Using these pins for the accelerometer I2C bus (SDA/SCL) creates a physical bus conflict whenever a USB cable or USB host is connected, leading to <code>RAW=ERRO</code> payload responses.<br/><strong>Recommended Fix for Future PCB Revisions:</strong> Reassign I2C SDA/SCL to un-multiplexed GPIO pins such as <strong>GPIO6</strong> and <strong>GPIO7</strong>.</p></div>
+<br/>
+<h3>2.2 ESP32-C6 Flash Partition Layout (<code>partitions_ota.csv</code>)</h<h3>
+<br/>
+<p>The ESP32-C6 utilizes a 4 MB flash layout optimized for dual Over-The-Air (OTA) firmware updates and on-chip raw sensor logging:</p>
+<br/>
+<table>
+<thead><tr><th>Partition Label</th><th>Subtype</th><th>Flash Offset</th><th>Size</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>nvs</code></td><td><code>nvs</code></td><td><code>0x009000</code></td><td>16 KB</td><td>Non-Volatile Storage (sand-mode state, calibration, logs)</td></tr>
+<tr><td><code>otadata</code></td><td><code>ota</code></td><td><code>0x00D000</code></td><td>8 KB</td><td>OTA selection state &amp; bootloader pointers</td></tr>
+<tr><td><code>phy_init</code></td><td><code>phy</code></td><td><code>0x00F000</code></td><td>4 KB</td><td>PHY initialization data</td></tr>
+<tr><td><code>ota_0</code></td><td><code>ota_0</code></td><td><code>0x010000</code></td><td>1344 KB</td><td><strong>Primary Application Slot A</strong> (~28% headroom)</td></tr>
+<tr><td><code>ota_1</code></td><td><code>ota_1</code></td><td><code>0x160000</code></td><td>1344 KB</td><td><strong>Secondary Application Slot B</strong> (OTA target slot)</td></tr>
+<tr><td><code>storage</code></td><td><code>undefined</code></td><td><code>0x2B0000</code></td><td>1344 KB</td><td><strong>Raw Sensor Log Partition</strong> (Direct partition read/write/erase)</td></tr>
+</tbody></table>
+<br/>
+<h3>2.3 Firmware Compilation &amp; Flashing Instructions</h<h3>
+<br/>
+<p><strong>Build Environment:</strong> ESP-IDF v5.5.1 with <code>riscv32-esp-elf</code> cross-toolchain on Windows.</p>
+<br/>
+<p>1. <strong>Building for ESP32-C6:</strong></p>
+<p>   <code></code>`powershell</p>
+<p>   # Navigate to the firmware directory</p>
+<p>   Set-Location C:\Users\Isaque\AndroidStudioProjects\FilterTrack\firmware</p>
+<br/>
+<p>   # Execute ESP-IDF build targeting ESP32-C6</p>
+<p>   &amp; "C:\Espressif\python_env\idf5.5_py3.14_env\Scripts\python.exe" `</p>
+<p>     "C:\Espressif\frameworks\esp-idf-v5.5.1\tools\idf.py" `</p>
+<p>     -B build-esp32c6 -DSDKCONFIG=sdkconfig_esp32c6 build</p>
+<p>   <code></code>`</p>
+<p>   <em>Output binary:</em> <code>firmware/build-esp32c6/FilterTrackv3.bin</code></p>
+<br/>
+<p>2. <strong>Flashing via Serial Cable (<code>esptool.py</code>):</strong></p>
+<p>   <code></code>`powershell</p>
+<p>   python -m esptool --chip esp32c6 -p COM3 -b 460800 `</p>
+<p>     --before default-reset --after hard-reset write-flash `</p>
+<p>     --flash-mode dio --flash-size 4MB --flash-freq 80m `</p>
+<p>     0x0     build-esp32c6\bootloader\bootloader.bin `</p>
+<p>     0x8000  build-esp32c6\partition_table\partition-table.bin `</p>
+<p>     0xd000  build-esp32c6\ota_data_initial.bin `</p>
+<p>     0x10000 build-esp32c6\FilterTrackv3.bin</p>
+<p>   <code></code>`</p>
+<br/>
+<hr/>
+<br/>
+<h2>3. Printed Circuit Board (PCB) Routing &amp; Physical Design (<code>router.pdf</code>)</h2>
+<br/>
+<p>The printed circuit board for the FilterTrack ESP32-C6 sensor unit was custom designed and routed by Isaque (composite routing diagram documented in <a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/router.pdf"><code>router.pdf</code></a>).</p>
+<br/>
+<h3>3.1 Composite Drawing Details (<code>router.pdf</code>)</h<h3>
+<p>* <strong>Document Name:</strong> <a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/router.pdf"><code>router.pdf</code></a></p>
+<p>* <strong>Title:</strong> Composite Drawing (Printed Circuit Board Copper Routing)</p>
+<p>* <strong>Author:</strong> Isaque (Created 2026-07-07)</p>
+<p>* <strong>Content &amp; Layout:</strong></p>
+<p>  - Standard dual-layer PCB copper track layout connecting the ESP32-C6 microcontroller dev module headers to external peripherals.</p>
+<p>  - Direct trace routing for <strong>AJ-SR04M / JSN-SR04T</strong> waterproof ultrasonic module connector (<code>GPIO1</code> Trigger, <code>GPIO0</code> Echo).</p>
+<p>  - Dedicated header connections for <strong>LSM303DLHC</strong> 6-DOF accelerometer module (<code>GPIO13</code> SDA, <code>GPIO12</code> SCL).</p>
+<p>  - Integrated current-limiting resistors and pads for status indicator LEDs (<code>GPIO2</code> Yellow, <code>GPIO3</code> Red, <code>GPIO4</code> Green).</p>
+<p>  - On-board power management traces delivering regulated +5V and +3.3V DC to sensor components with decoupling capacitors for ultrasonic noise reduction.</p>
+<br/>
+<hr/>
+<br/>
+<h2>4. 3D-Printed Protective Enclosure (.STL Files)</h2>
+<br/>
+<p>FilterTrack includes a complete 3-piece weather-resistant 3D-printed enclosure designed to protect the ESP32-C6 PCB, sensors, and power source when deployed over water filter basins.</p>
+<br/>
+<table>
+<thead><tr><th>STL File Name</th><th>File Size</th><th>Triangle Count</th><th>Approximate Dimensions (L × W × H)</th><th>Mechanical Function</th></tr></thead>
+<tbody>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/FilterTrackCase.stl"><code>FilterTrackCase.stl</code></a></td><td>91.9 KB</td><td>1,838</td><td><strong>100 mm × 110 mm × 50 mm</strong></td><td><strong>Main Body Housing:</strong> Encloses the ESP32-C6 carrier PCB, battery compartment, status LED viewports, and ultrasonic sensor port.</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/FilterTrackLid.stl"><code>FilterTrackLid.stl</code></a></td><td>27.0 KB</td><td>540</td><td><strong>100 mm × 110 mm × 6 mm</strong></td><td><strong>Top Protection Cover:</strong> Snaps/screws onto the main case to seal against water splashes and debris.</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/FilterTrackLock.stl"><code>FilterTrackLock.stl</code></a></td><td>948.7 KB</td><td>18,974</td><td><strong>100 mm × 90 mm × 90 mm</strong></td><td><strong>Mounting Latch / Clamp:</strong> High-precision heavy-duty locking bracket for securing the unit onto filter basin railings.</td></tr>
+</tbody></table>
+<br/>
+<h3>4.1 3D Printing Guidelines</h<h3>
+<p>* <strong>Recommended Material:</strong> PETG or ABS (for outdoor UV resistance, splash resistance, and structural durability).</p>
+<p>* <strong>Layer Height:</strong> 0.20 mm (Standard resolution).</p>
+<p>* <strong>Infill:</strong> 20% to 30% (Grid or Gyroid infill for structural strength on the mounting clamp).</p>
+<p>* <strong>Wall Perimeter Count:</strong> Minimum 3 to 4 walls (1.2 mm - 1.6 mm thickness).</p>
+<br/>
+<hr/>
+<br/>
+<h2>5. Firmware BLE Contract &amp; Communication Protocol</h2>
+<br/>
+<h3>5.1 BLE Service &amp; Characteristics</h<h3>
+<p>* <strong>Advertised Device Name:</strong> <code>FilterTrackV3</code></p>
+<p>* <strong>Primary Service UUID:</strong> <code>000000ff-0000-1000-8000-00805f9b34fb</code> (<code>0x00FF</code>)</p>
+<p>* <strong>Command &amp; Notification Characteristic:</strong> <code>0000ff01-0000-1000-8000-00805f9b34fb</code> (<code>0xFF01</code>)</p>
+<p>* <strong>OTA Data Characteristic:</strong> <code>0000ff02-0000-1000-8000-00805f9b34fb</code> (<code>0xFF02</code>)</p>
+<br/>
+<h3>5.2 Notification Data Formats (~100 ms Interval)</h<h3>
+<p>1. <strong>Standard Reading (with raw tilt accelerometer):</strong></p>
+<p>   <code></code>`text</p>
+<p>   DIST=%.2f;ACC_RAW=%d,%d,%d</p>
+<p>   <code></code>`</p>
+<p>   <em>Compact split chunk format:</em> <code>D=35.47;A=12,-8,102</code> (reassembled in <code>BLEManager.kt</code> upon receiving <code>D=</code>).</p>
+<br/>
+<p>2. <strong>Tilt Distance Correction Formula:</strong>  </p>
+<p>   When tilt accelerometer data is available, Android computes true vertical distance using:</p>
+<p>   $$\text{Vertical Distance} = \text{DIST} \times \sin\left(\arccos(|g_z|)\right)$$</p>
+<br/>
+<h3>5.3 Control Commands (Android to ESP32-C6 over <code>0xFF01</code>)</h<h3>
+<br/>
+<table>
+<thead><tr><th>Command String</th><th>Firmware Response / Action</th><th>Application Usage</th></tr></thead>
+<tbody>
+<tr><td><code>0</code></td><td>Calls <code>esp_restart()</code></td><td>Reboots the ESP32-C6 microcontroller</td></tr>
+<tr><td><code>1</code></td><td>Enables low-power standby; turns off ultrasonic sensor</td><td>Saves power between operational shifts</td></tr>
+<tr><td><code>2</code></td><td>Disables low-power standby; powers ultrasonic sensor back on</td><td>Resumes active measurement</td></tr>
+<tr><td><code>3</code></td><td>Notifies <code>VER=&lt;PROJECT_VER&gt;</code></td><td>Query current firmware version</td></tr>
+<tr><td><code>4</code></td><td>Runs full flash self-test on <code>storage</code> partition</td><td>Hardware validation (destroys logged raw data)</td></tr>
+<tr><td><code>5</code></td><td>Enables sand-filter wash detection mode (<code>SAND=1</code>)</td><td>Enforces automatic wash detection state machine</td></tr>
+<tr><td><code>6</code></td><td>Disables sand-filter mode (<code>SAND=0</code>)</td><td>Aborts open wash state without logging records</td></tr>
+<tr><td><code>LOG:COUNT</code></td><td>Notifies <code>WL=CNT,&lt;count&gt;,&lt;boot&gt;,&lt;uptime&gt;</code></td><td>Queries stored wash log entry count</td></tr>
+<tr><td><code>LOG:READ</code></td><td>Streams <code>WL=R,...</code> records followed by <code>WL=END</code></td><td>Dumps logged wash events to Android app</td></tr>
+<tr><td><code>LOG:ACK:&lt;n&gt;</code></td><td>Erases log if count matches <code>&lt;n&gt;</code> (<code>WL=CLR</code>)</td><td>Confirms log sync and frees on-chip storage</td></tr>
+<tr><td><code>CAL:SET:&lt;cm&gt;</code></td><td>Calibrates sensor tilt factor based on known water level</td><td>Calculates tilt factor $f = \frac{\text{real}}{\text{measured}}$</td></tr>
+</tbody></table>
+<br/>
+<hr/>
+<br/>
+<h2>6. Android Mobile Application &amp; Release APK (<code>app-release.apk</code>)</h2>
+<br/>
+<p>The field technician mobile client is built as a hybrid native/web Android application.</p>
+<br/>
+<h3>6.1 Executable <code>.apk</code> and Package Information</h<h3>
+<p>* <strong>Production Release APK File:</strong> <a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/app/build/outputs/apk/release/app-release.apk"><code>app/build/outputs/apk/release/app-release.apk</code></a></p>
+<p>  * <strong>File Size:</strong> <strong>2.26 MB</strong> (2,265,043 bytes)</p>
+<p>  * <strong>Build Target:</strong> Release Signed (<code>versionCode=2</code>, <code>versionName=1.0</code>)</p>
+<p>* <strong>Development Debug APK File:</strong> <a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/app/build/outputs/apk/debug/app-debug.apk"><code>app/build/outputs/apk/debug/app-debug.apk</code></a> (14.75 MB)</p>
+<p>* <strong>Google Play Bundle:</strong> <a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/app/build/outputs/bundle/release/app-release.aab"><code>app/build/outputs/bundle/release/app-release.aab</code></a> (<code>versionCode=3</code>, <code>versionName=1.1</code>)</p>
+<p>* <strong>Package Name:</strong> <code>com.filtertrack</code></p>
+<br/>
+<h3>6.2 Application Architecture &amp; Native-JS Bridge</h<h3>
+<p>The app features a native Kotlin shell (<code>MainActivity.kt</code>, <code>BLEManager.kt</code>, <code>BiDashboardActivity.kt</code>) hosting an embedded WebView UI (<a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/app/src/main/assets/index.html"><code>app/src/main/assets/index.html</code></a>).</p>
+<br/>
+<p>* <strong>JavaScript Bridge Name:</strong> <code>window.Android</code></p>
+<p>* <strong>Exposed Native Commands:</strong> <code>startScan()</code>, <code>stopScan()</code>, <code>connect(address)</code>, <code>disconnect()</code>, <code>sendCommand(cmd)</code>, <code>openBiDashboard()</code>, <code>isBluetoothEnabled()</code>, <code>startFirmwareUpdate(bytes)</code>.</p>
+<p>* <strong>Native Callbacks to JS:</strong> <code>window.FilterTrackBridge.onDeviceFound(...)</code>, <code>onDataReceived(...)</code>, <code>onConnectionStateChanged(...)</code>, <code>onOtaProgress(...)</code>.</p>
+<br/>
+<pre><code class="">               Android Native Kotlin Shell
+   +--------------------------------------------------+
+   |  BLEManager.kt  &lt;---&gt;  MainActivity.kt           |
+   +--------------------------|-----------------------+
+                              | window.Android / window.FilterTrackBridge
+                              v
+               WebView Layer (index.html)
+   +--------------------------------------------------+
+   |  - Minimal Mode (Single-screen sand filter UI)   |
+   |  - Full App Mode (5 Tabs: Monitor, Sessoes,      |
+   |    Filtros, Ajustes, Dados)                      |
+   +--------------------------------------------------+</code></pre>
+<br/>
+<h3>6.3 Dual User Interface Modes</h<h3>
+<br/>
+<p>1. <strong>Minimal Mode (Default Field Interface):</strong></p>
+<p>   * Optimized for quick field operation by plant technicians.</p>
+<p>   * Auto-sends command <code>5</code> (<code>SAND=1</code>) on connect to enable ESP32-C6 wash detection.</p>
+<p>   * Shows a clean single-screen interface:</p>
+<p>     - <strong>Velocidade de subida (Water Velocity):</strong> Calculated in <strong>m/min</strong> (2 decimal places) over rolling 10-second analysis windows.</p>
+<p>     - <strong>Vazão (Water Flow Rate):</strong> Displayed in <strong>L/min</strong> (or toggled to <strong>m³/h</strong>).</p>
+<p>     - <strong>Flow Direction Badge:</strong> <strong>Subindo (Green / Rising)</strong> when level increases; <strong>Descendo (Red / Falling)</strong> when level decreases.</p>
+<p>     - <strong>Wash State Banner:</strong> Listens for <code>WL=WSTART</code> and <code>WL=WEVT</code> notifications to announce active filter backwash sessions.</p>
+<p>   * Includes a button <code>"Abrir app completo"</code> to access advanced tools.</p>
+<br/>
+<p>2. <strong>Full App Mode (Multi-Tab Navigation):</strong></p>
+<p>   * <strong>Monitor Tab:</strong> Full real-time metric cards, velocity history chart, flow direction, and selected filter metadata.</p>
+<p>   * <strong>Sessões Tab:</strong> Local session archives, session detail chart modal, manual cloud sync triggering, and compact JSON exports.</p>
+<p>   * <strong>Filtros Tab:</strong> Filter catalog browser and filter selection picker with station/area details.</p>
+<p>   * <strong>Ajustes Tab:</strong> Firmware OTA update utility, sensor tilt calibration (<code>CAL:</code>), wash detection parameter configuration (<code>CFG:</code>), low-power control, and ESP restart button.</p>
+<p>   * <strong>Dados Tab:</strong> Launches the integrated Business Intelligence dashboard.</p>
+<br/>
+<h3>6.4 Data Filtering Rules &amp; Signal Processing Pipeline</h<h3>
+<p>* <strong>Minimum Distance Threshold:</strong> Distance readings $&lt; 25\text{ cm}$ are discarded as invalid sensor noise.</p>
+<p>* <strong>Outlier Filtering:</strong> 2-second median/MAD windowing.</p>
+<p>* <strong>Maximum Velocity Cap:</strong> Velocities $&gt; 10\text{ m/min}$ are rejected as physical spikes.</p>
+<p>* <strong>Movement Threshold:</strong> Water level displacement $&lt; 0.1\text{ cm}$ over 10 seconds is treated as stationary ($0.0\text{ m/min}$).</p>
+<br/>
+<hr/>
+<br/>
+<h2>7. Cloud Backend &amp; BI Dashboard</h2>
+<br/>
+<h3>7.1 Backend Services &amp; Hosting</h<h3>
+<p>* <strong>Framework:</strong> FastAPI (Python 3.11+)</p>
+<p>* <strong>Database:</strong> SQLite on persistent Fly.io Volume (<code>/data/filtertrack.db</code>)</p>
+<p>* <strong>Production API Base URL:</strong> <code>https://filtertrack-api.fly.dev</code></p>
+<p>* <strong>BI Dashboard Base URL:</strong> <code>https://filtertrack-api.fly.dev/bi</code></p>
+<br/>
+<h3>7.2 Session Upload Endpoint (<code>POST /filtertrack/sessions</code>)</h<h3>
+<p>Field sessions are synced using a compact array serialization scheme (<code>distance_cm_x100_v1</code>) to minimize cellular payload sizes:</p>
+<br/>
+<pre><code class="json">{
+  "schemaVersion": 1,
+  "app": "FilterTrack",
+  "uploadedAt": "2026-08-07T10:40:00Z",
+  "session": {
+    "id": "session-1770000000000",
+    "startedAt": "2026-08-07T10:30:00Z",
+    "endedAt": "2026-08-07T10:40:00Z",
+    "endReason": "manual_stop",
+    "device": { "name": "FilterTrackV3", "address": "AA:BB:CC:DD:EE:FF" },
+    "filter": {
+      "id": "ETA_GAVIÃO_FILTRO_01",
+      "name": "Filtro 01",
+      "areaM2": 7.07,
+      "station": "ETA Gavião",
+      "businessUnit": "UN-METROPOLITANA"
+    },
+    "samples": {
+      "format": "distance_cm_x100_v1",
+      "t0": 1770000000000,
+      "dtUnit": "ms",
+      "distanceUnit": "cm",
+      "scale": 100,
+      "t": [0, 100, 200, 300],
+      "d": [3547, 3546, 3544, 3542]
+    }
+  }
+}</code></pre>
+<br/>
+<h3>7.3 Integrated BI Dashboard (<code>backend-fastapi/app/static/bi.html</code>)</h<h3>
+<p>The BI dashboard provides management and operational teams with comprehensive insights:</p>
+<p>* <strong>Key Performance Indicators (KPIs):</strong> Total sessions, active filters monitored, average net backwash flow rates, total backwash volume.</p>
+<p>* <strong>Interactive Charts:</strong> Average Net Flow by Filter (L/min), Flow Direction Distribution, Daily Backwash Volume Trends, Samples by Water Treatment Station.</p>
+<p>* <strong>Data Correction Workflows:</strong> Allows operators to submit proposals for re-assigning filter metadata or splitting multi-phase sessions into discrete time slices. Admin role approves or rejects proposals.</p>
+<br/>
+<hr/>
+<br/>
+<h2>8. File &amp; Directory Reference Catalog</h2>
+<br/>
+<table>
+<thead><tr><th>Directory / File</th><th>Description & Purpose</th></tr></thead>
+<tbody>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/DOCUMENTATION.md"><code>DOCUMENTATION.md</code></a></td><td><strong>This master documentation file (Single Source of Truth)</strong></td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/router.pdf"><code>router.pdf</code></a></td><td>Printed Circuit Board (PCB) composite copper routing diagram</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/FilterTrackCase.stl"><code>FilterTrackCase.stl</code></a></td><td>Main body 3D enclosure STL file (100 × 110 × 50 mm)</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/FilterTrackLid.stl"><code>FilterTrackLid.stl</code></a></td><td>Top cover 3D lid STL file (100 × 110 × 6 mm)</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/FilterTrackLock.stl"><code>FilterTrackLock.stl</code></a></td><td>Heavy-duty mounting latch/clamp STL file (100 × 90 × 90 mm)</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/app/build/outputs/apk/release/app-release.apk"><code>app/build/outputs/apk/release/app-release.apk</code></a></td><td><strong>Production executable release APK</strong> (~2.26 MB)</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/firmware/main/FilterTrackv3.c"><code>firmware/main/FilterTrackv3.c</code></a></td><td>Core ESP-IDF C source code for ESP32-C6</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/firmware/partitions_ota.csv"><code>firmware/partitions_ota.csv</code></a></td><td>ESP32-C6 flash partition table (OTA slots + sensor storage)</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/app/src/main/assets/index.html"><code>app/src/main/assets/index.html</code></a></td><td>Native Android WebView user interface (Minimal + Full modes)</td></tr>
+<tr><td><a href="file:///C:/Users/Isaque/AndroidStudioProjects/FilterTrack/backend-fastapi/app/static/bi.html"><code>backend-fastapi/app/static/bi.html</code></a></td><td>Static BI dashboard served at <code>https://filtertrack-api.fly.dev/bi</code></td></tr>
+</tbody></table>
+<br/>
+<hr/>
+<br/>
+<h2>9. Conclusion &amp; Verification</h2>
+<br/>
+<p>This master document represents the single, consolidated, true specification for the <strong>FilterTrack</strong> system as of August 2026. All hardware pinouts, software boundaries, physical enclosure files, and communication protocols defined herein reflect the active production system.</p>
+</body>
+</html>

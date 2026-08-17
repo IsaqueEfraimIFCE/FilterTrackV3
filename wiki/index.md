@@ -24,7 +24,10 @@ not chronological. For recent wiki maintenance, see [log.md](log.md).
 - [android-play-internal-testing.md](android-play-internal-testing.md) - Play internal
   testing package, signing, build, and console checklist.
 - [ble-firmware-contract.md](ble-firmware-contract.md) - advertised BLE name, UUIDs,
-  notification payloads, commands, and firmware assumptions.
+  notification payloads, commands, wash detection, calibration, OTA, and
+  firmware assumptions.
+- [firmware-build-and-flash.md](firmware-build-and-flash.md) - ESP-IDF build
+  environment, C3/C6 build and flash commands, OTA layout, troubleshooting.
 - [sensor-processing-flow.md](sensor-processing-flow.md) - raw distance parsing,
   filtering, 10-second windows, chart reset behavior, sign convention.
 
@@ -50,13 +53,16 @@ not chronological. For recent wiki maintenance, see [log.md](log.md).
 ## High-Value Facts
 
 - Active Android UI source: `app/src/main/assets/index.html`.
+- The app starts in **minimal mode** (single-screen sand-filter UI) by
+  default; the full tabbed app is behind "Abrir app completo".
 - Active BI source: `backend-fastapi/app/static/bi.html`.
 - Backend app path: `backend-fastapi/`.
 - Active firmware source: `firmware/main/FilterTrackv3.c`.
 - Production backend: `https://filtertrack-api.fly.dev/`.
 - Production BI: `https://filtertrack-api.fly.dev/bi`.
-- Play Console package: `com.filtertrack`; current uploaded-test build uses
-  `versionCode=2`, `versionName=1.0`.
+- Play Console package: `com.filtertrack`; last uploaded-test build used
+  `versionCode=2`, `versionName=1.0`; a new AAB with `versionCode=3`,
+  `versionName=1.1` was built 2026-07-09 (pending upload).
 - Signed Play AAB path: `app/build/outputs/bundle/release/app-release.aab`.
 - Privacy policy URL: `https://filtertrack-api.fly.dev/privacy`.
 - Fly app: `filtertrack-api`, region `gru`, single SQLite DB on a Fly volume.

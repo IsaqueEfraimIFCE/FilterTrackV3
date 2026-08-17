@@ -13,6 +13,11 @@ class WebAppInterface(
         object Disconnect : Action()
         data class SendCommand(val cmd: String) : Action()
         object OpenBiDashboard : Action()
+        object OpenCsvGuide : Action()
+        data class SetInitialGuideActive(val active: Boolean) : Action()
+        data class SetGuideDataButtonsVisible(val visible: Boolean) : Action()
+        data class CompleteInitialGuide(val showNextTime: Boolean) : Action()
+        data class SetGuideStartupPreference(val showOnStartup: Boolean) : Action()
         object UpdateFirmware : Action()
         object CancelFirmwareUpdate : Action()
     }
@@ -34,6 +39,27 @@ class WebAppInterface(
 
     @JavascriptInterface
     fun openBiDashboard() { onAction(Action.OpenBiDashboard) }
+
+    @JavascriptInterface
+    fun openCsvGuide() { onAction(Action.OpenCsvGuide) }
+
+    @JavascriptInterface
+    fun setInitialGuideActive(active: Boolean) { onAction(Action.SetInitialGuideActive(active)) }
+
+    @JavascriptInterface
+    fun setGuideDataButtonsVisible(visible: Boolean) {
+        onAction(Action.SetGuideDataButtonsVisible(visible))
+    }
+
+    @JavascriptInterface
+    fun completeInitialGuide(showNextTime: Boolean) {
+        onAction(Action.CompleteInitialGuide(showNextTime))
+    }
+
+    @JavascriptInterface
+    fun setGuideStartupPreference(showOnStartup: Boolean) {
+        onAction(Action.SetGuideStartupPreference(showOnStartup))
+    }
 
     @JavascriptInterface
     fun updateFirmware() { onAction(Action.UpdateFirmware) }

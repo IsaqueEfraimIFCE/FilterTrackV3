@@ -90,25 +90,53 @@ class BLEManager private constructor(private val context: Context) {
 
     private val pendingPayload = StringBuilder()
 
+    // Firmware splits notifications longer than 20 bytes into chunks; only the
+    // first chunk carries one of these message prefixes, so a chunk that starts
+    // with one is always the beginning of a new message.
+    private val MESSAGE_PREFIXES = arrayOf("D=", "DIST=", "WL=", "SAND=", "VER=", "ST=", "CAL=", "CFG=", "ERRO")
+    private val PAYLOAD_FLUSH_MS = 150L
+
+    private val payloadFlushRunnable = Runnable { flushPendingPayload() }
+
+    private fun flushPendingPayload() {
+        handler.removeCallbacks(payloadFlushRunnable)
+        if (pendingPayload.isNotEmpty()) {
+            val msg = pendingPayload.toString()
+            pendingPayload.clear()
+            if (!msg.startsWith("D=")) Log.d(TAG, "rx: $msg")
+            dataListener?.onDataReceived(msg)
+        }
+    }
+
+    private fun isMessageStart(s: String): Boolean =
+        MESSAGE_PREFIXES.any { s.startsWith(it) }
+
+    // Runs on `handler` (main) thread — see onCharacteristicChanged.
     private fun handleRawBleData(s: String) {
         if (s.startsWith("OTA=")) {
+            flushPendingPayload()
             handleOtaNotification(s.trim())
             return
         }
         when {
-            s.startsWith("D=") -> {
-                val prev = pendingPayload.toString()
-                pendingPayload.clear()
+            isMessageStart(s) -> {
+                // New message: dispatch whatever was buffered, start buffering
+                // this one. The flush timer covers the last message before a
+                // silence gap (chunks arrive ~10 ms apart, messages ≥30 ms).
+                flushPendingPayload()
                 pendingPayload.append(s)
-                if (prev.isNotEmpty()) dataListener?.onDataReceived(prev)
+                handler.postDelayed(payloadFlushRunnable, PAYLOAD_FLUSH_MS)
             }
             pendingPayload.isEmpty() -> {
-                // Standalone message (e.g. ERRO_TIMEOUT) — dispatch immediately.
+                // Unrecognized standalone chunk — dispatch immediately.
+                Log.d(TAG, "rx (unbuffered): $s")
                 dataListener?.onDataReceived(s)
             }
             else -> {
-                // Continuation chunk for the current D= payload.
+                // Continuation chunk for the buffered message.
                 pendingPayload.append(s)
+                handler.removeCallbacks(payloadFlushRunnable)
+                handler.postDelayed(payloadFlushRunnable, PAYLOAD_FLUSH_MS)
             }
         }
     }
@@ -304,6 +332,7 @@ class BLEManager private constructor(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun closeGatt() {
+        handler.removeCallbacks(payloadFlushRunnable)
         pendingPayload.clear()
         bluetoothGatt?.let {
             try { it.disconnect() } catch (_: Throwable) {}

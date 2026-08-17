@@ -20,6 +20,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 
@@ -30,16 +31,22 @@ class MainActivity : AppCompatActivity(),
 
     companion object {
         const val EXTRA_STARTUP_ERROR = "startup_error"
+        const val EXTRA_INITIAL_GUIDE = "initial_guide"
+        const val GUIDE_PREFS = "filtertrack_guide"
+        const val GUIDE_COMPLETE = "initial_guide_complete_v1"
+        const val GUIDE_SHOW_ON_STARTUP = "show_initial_guide_on_startup_v1"
     }
 
     private lateinit var webView: WebView
     private lateinit var bleManager: BLEManager
     private lateinit var biButton: View
+    private lateinit var csvAnalysisButton: View
 
     @Volatile private var pageReady = false
     private val pendingJs = ArrayDeque<String>()
     private var pendingScanAfterBluetoothEnable = false
     private var bluetoothReceiverRegistered = false
+    private var initialGuideActive = false
 
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -106,9 +113,7 @@ class MainActivity : AppCompatActivity(),
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        applyFilterTrackSystemBars(findViewById(R.id.appRoot))
 
         bleManager = BLEManager.getInstance(this)
         bleManager.bleListener = this
@@ -117,8 +122,16 @@ class MainActivity : AppCompatActivity(),
 
         webView = findViewById(R.id.webView)
         biButton = findViewById(R.id.biButton)
+        csvAnalysisButton = findViewById(R.id.csvAnalysisButton)
+        initialGuideActive = shouldShowGuideOnStartup()
+        if (initialGuideActive) {
+            setBiButtonVisible(false)
+            setCsvButtonVisible(false)
+        }
         biButton.setOnClickListener { openBiDashboard() }
+        csvAnalysisButton.setOnClickListener { openCsvAnalysis(initialGuideActive) }
         setupWebView()
+        installWebViewBackHandler()
         registerBluetoothStateReceiver()
         showStartupErrorIfAny(intent)
     }
@@ -131,9 +144,13 @@ class MainActivity : AppCompatActivity(),
             bleManager.disconnect()
             pageReady = false
             pendingJs.clear()
+            val suppressGuideOnce = intent.getBooleanExtra("suppress_initial_guide_once", false)
+            initialGuideActive = shouldShowGuideOnStartup() && !suppressGuideOnce
+            setCsvButtonVisible(true)
             setBiButtonVisible(true)
-            webView.loadUrl("file:///android_asset/index.html")
+            webView.loadUrl(initialPageUrl(suppressGuideOnce))
             intent.removeExtra("reset_to_initial_screen")
+            intent.removeExtra("suppress_initial_guide_once")
         }
         showStartupErrorIfAny(intent)
     }
@@ -161,6 +178,12 @@ class MainActivity : AppCompatActivity(),
             override fun onPageFinished(view: WebView?, url: String?) {
                 pageReady = true
                 flushPending()
+                if (url?.contains("guide=1") == true) {
+                    webView.evaluateJavascript(
+                        "window.__filterTrackGuideRequested=true;window.FilterTrackStartGuide&&window.FilterTrackStartGuide();",
+                        null,
+                    )
+                }
             }
         }
 
@@ -169,9 +192,23 @@ class MainActivity : AppCompatActivity(),
         }
         webView.addJavascriptInterface(iface, "Android")
 
-        webView.loadUrl("file:///android_asset/index.html")
+        webView.loadUrl(initialPageUrl())
     }
 
+    private fun shouldShowGuideOnStartup(): Boolean {
+        val prefs = getSharedPreferences(GUIDE_PREFS, MODE_PRIVATE)
+        return if (prefs.contains(GUIDE_SHOW_ON_STARTUP)) {
+            prefs.getBoolean(GUIDE_SHOW_ON_STARTUP, true)
+        } else {
+            !prefs.getBoolean(GUIDE_COMPLETE, false)
+        }
+    }
+
+    private fun initialPageUrl(suppressGuideOnce: Boolean = false): String {
+        val preference = shouldShowGuideOnStartup()
+        val startGuide = preference && !suppressGuideOnce
+        return "file:///android_asset/index.html?guide=${if (startGuide) 1 else 0}&guideOnStartup=${if (preference) 1 else 0}"
+    }
     private fun registerBluetoothStateReceiver() {
         if (bluetoothReceiverRegistered) return
         val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
@@ -191,6 +228,36 @@ class MainActivity : AppCompatActivity(),
             is WebAppInterface.Action.Connect -> bleManager.connect(action.address)
             WebAppInterface.Action.Disconnect -> bleManager.disconnect()
             WebAppInterface.Action.OpenBiDashboard -> openBiDashboard()
+            WebAppInterface.Action.OpenCsvGuide -> openCsvAnalysis(initialGuide = true)
+            is WebAppInterface.Action.SetInitialGuideActive -> {
+                initialGuideActive = action.active
+                if (action.active) {
+                    setCsvButtonVisible(false)
+                    setBiButtonVisible(false)
+                } else {
+                    setCsvButtonVisible(true)
+                    setBiButtonVisible(true)
+                }
+            }
+            is WebAppInterface.Action.SetGuideDataButtonsVisible -> {
+                setCsvButtonVisible(action.visible)
+                setBiButtonVisible(action.visible)
+            }
+            is WebAppInterface.Action.CompleteInitialGuide -> {
+                initialGuideActive = false
+                getSharedPreferences(GUIDE_PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(GUIDE_COMPLETE, true)
+                    .putBoolean(GUIDE_SHOW_ON_STARTUP, action.showNextTime)
+                    .apply()
+                setCsvButtonVisible(true)
+                setBiButtonVisible(true)
+            }
+            is WebAppInterface.Action.SetGuideStartupPreference -> {
+                getSharedPreferences(GUIDE_PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(GUIDE_SHOW_ON_STARTUP, action.showOnStartup)
+                    .apply()
+            }
             WebAppInterface.Action.UpdateFirmware ->
                 firmwarePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
             WebAppInterface.Action.CancelFirmwareUpdate -> bleManager.cancelFirmwareUpdate()
@@ -205,11 +272,24 @@ class MainActivity : AppCompatActivity(),
         startActivity(Intent(this, BiDashboardActivity::class.java))
     }
 
+    private fun openCsvAnalysis(initialGuide: Boolean = false) {
+        startActivity(Intent(this, CsvAnalysisActivity::class.java).apply {
+            putExtra(EXTRA_INITIAL_GUIDE, initialGuide)
+        })
+    }
+
     private fun setBiButtonVisible(visible: Boolean) {
         if (::biButton.isInitialized) {
             biButton.visibility = if (visible) View.VISIBLE else View.GONE
         }
     }
+
+    private fun setCsvButtonVisible(visible: Boolean) {
+        if (::csvAnalysisButton.isInitialized) {
+            csvAnalysisButton.visibility = if (visible) View.VISIBLE else View.GONE
+        }
+    }
+
 
     private fun checkPermissionsAndScan() {
         if (!bleManager.isBluetoothEnabled()) {
@@ -332,7 +412,10 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
-    }
-}
+    private fun installWebViewBackHandler() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) webView.goBack() else finish()
+            }
+        })
+    }}
