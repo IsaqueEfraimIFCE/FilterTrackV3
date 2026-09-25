@@ -28,7 +28,11 @@
   // Surfaces bridge-internal status directly in the page's own "Raw ESP"
   // debug panel (via onDataReceived) — the only way to see what's happening
   // on phones/browsers where the JS console isn't reachable (e.g. Bluefy).
+  // The page clears that panel when it receives "Connected", so lines logged
+  // during the connect flow are kept and replayed right after it.
+  const connectDiag = [];
   function diag(msg) {
+    connectDiag.push(msg);
     push("onDataReceived", `BRIDGE:${msg}`);
   }
 
@@ -139,6 +143,19 @@
 
   let connecting = false;
 
+  // The page (ported from the Android app, where scanning is silent)
+  // auto-calls startScan() ~1s after any disconnect or failed scan. Here each
+  // call opens the browser's device picker, so unguarded it re-opened the
+  // picker in a loop after the user dismissed it. Automatic calls are allowed
+  // until the user dismisses the picker; after that only a real tap reopens it.
+  let pickerOpen = false;
+  let pickerDismissed = false;
+  let lastGestureAt = 0;
+  const GESTURE_WINDOW_MS = 2000;
+  ["pointerdown", "touchend", "click"].forEach((type) =>
+    document.addEventListener(type, () => { lastGestureAt = Date.now(); }, true)
+  );
+
   async function connectDevice(device, address) {
     if (device.gatt.connected && cmdChar) {
       // Already connected to this exact device — re-announce state instead
@@ -150,6 +167,12 @@
     }
     if (connecting) return;
     connecting = true;
+    connectDiag.length = 0;
+    // Tell the page a connection is in progress: its auto-scan effect only
+    // stays quiet while status is "Connecting". Without this it opened a
+    // second requestDevice() picker in the middle of the GATT connect, which
+    // made iOS drop the link (HCI 0x13) and the picker reappear in a loop.
+    push("onConnectionStateChanged", "Connecting", device.name || "FilterTrack", address);
 
     device.removeEventListener("gattserverdisconnected", onGattDisconnected);
     device.addEventListener("gattserverdisconnected", onGattDisconnected);
@@ -169,21 +192,23 @@
       cmdChar.addEventListener("characteristicvaluechanged", handleNotify);
       cmdChar.oncharacteristicvaluechanged = handleNotify;
 
+      // startNotifications() writes the CCCD (0x2902) itself. Never write the
+      // CCCD directly: Web Bluetooth blocklists it and CoreBluetooth (Bluefy)
+      // forbids it. The firmware must expose a CCCD; without one iOS can't
+      // subscribe and drops every notification while still showing
+      // "Connected".
+      try {
+        await cmdChar.getDescriptor(CCCD_UUID);
+        diag("CCCD present on device");
+      } catch {
+        diag("CCCD MISSING on device — iOS can't subscribe; update the firmware");
+      }
+
       try {
         await cmdChar.startNotifications();
         diag("startNotifications() resolved OK");
       } catch (notifyErr) {
         diag(`startNotifications() FAILED: ${notifyErr.message || notifyErr}`);
-      }
-
-      // Belt-and-suspenders: write the CCCD directly in case
-      // startNotifications() silently didn't, on this WebBLE stack.
-      try {
-        const cccd = await cmdChar.getDescriptor(CCCD_UUID);
-        await cccd.writeValue(new Uint8Array([1, 0]));
-        diag("CCCD write OK (notifications explicitly enabled)");
-      } catch (cccdErr) {
-        diag(`CCCD write skipped/failed: ${cccdErr.message || cccdErr}`);
       }
 
       try {
@@ -193,6 +218,7 @@
       }
 
       push("onConnectionStateChanged", "Connected", device.name || "FilterTrack", address);
+      connectDiag.forEach((msg) => push("onDataReceived", `BRIDGE:${msg}`));
       diag("connected — waiting for first notification...");
     } catch (e) {
       diag(`connect flow FAILED: ${e.message || e}`);
@@ -210,6 +236,9 @@
         push("onScanStateChanged", false);
         return;
       }
+      if (pickerOpen || connecting || (activeDevice && activeDevice.gatt.connected)) return;
+      if (pickerDismissed && Date.now() - lastGestureAt > GESTURE_WINDOW_MS) return;
+      pickerOpen = true;
       push("onScanStateChanged", true);
       // Filter by name prefix rather than service UUID: the firmware
       // advertises SERVICE_UUID as a 16-bit UUID, and some WebBLE stacks
@@ -224,6 +253,7 @@
           optionalServices: [SERVICE_UUID],
         })
         .then((device) => {
+          pickerDismissed = false;
           knownDevices.set(device.id, device);
           push("onDeviceFound", device.name || "FilterTrack", device.id, 0);
           // Auto-connect: the OS picker tap already was the user's explicit
@@ -232,9 +262,12 @@
           connectDevice(device, device.id);
         })
         .catch((e) => {
-          push("onError", e.message || String(e));
+          pickerDismissed = true;
+          // Closing the picker (NotFoundError) is a normal choice, not an error.
+          if (e && e.name !== "NotFoundError") push("onError", e.message || String(e));
         })
         .finally(() => {
+          pickerOpen = false;
           push("onScanStateChanged", false);
         });
     },
