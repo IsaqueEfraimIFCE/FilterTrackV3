@@ -15,8 +15,8 @@
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
 <script src="vendor/babel.min.js"></script>
-<script src="bi-config.js?v=9"></script>
-<script src="bridge.js?v=9"></script>
+<script src="bi-config.js?v=10"></script>
+<script src="bridge.js?v=10"></script>
 <style>
 :root {
   --cagece-blue: #0068B4; --cagece-blue-hover: #0058a0; --cagece-blue-active: #00477f;
@@ -1097,7 +1097,6 @@ function ConnectScreen({ ble, autoConnectDevice, isPreferredDevice = () => false
               : "O app procura e conecta automaticamente ao sensor BLE FilterTrack instalado na ETA."}
           </p>
         </div>
-        <ApkInstallCard style={{ margin: 0 }} />
 
         {manualDeviceChoice ? <StatusInline kind="warning">Toque no sensor correto para continuar. A conexao automatica fica pausada enquanto houver mais de um FilterTrackV3 visivel.</StatusInline> : null}
         {ble.errorMsg ? <StatusInline kind="danger">{ble.errorMsg}</StatusInline> : null}
@@ -2164,54 +2163,48 @@ function FilterPickerOverlay({ filters, suggestedFilter, onPick, onClose }) {
 }
 
 /* ===== INTERACTIVE GUIDE ===== */
-/* ===== ANDROID APP INSTALL CARD =====
-   Offer of the native Android app (APK) on the first screen, kept until the
-   person closes it (bridge.js's window.FilterTrackApk does the download). */
-// Installing is optional: the whole app works in Chrome. Tapping "Instalar"
-// first explains that; the APK downloads only from the explicit
-// "Baixar e instalar mesmo assim" button.
-function ApkInstallCard({ style }) {
+/* ===== ANDROID APP INSTALL DIALOG =====
+   Opened from the "⬇ App" button next to "?" in the bottom bar (Android
+   only). Installing is optional — the whole app works in Chrome — so the
+   dialog says that first; the APK downloads only from the explicit
+   "Baixar e instalar mesmo assim" button (bridge.js's FilterTrackApk). */
+function ApkInstallDialog({ open, onClose }) {
   const apk = window.FilterTrackApk;
-  const [hidden, setHidden] = useState(() => !apk || !apk.available || apk.dismissed());
-  const [stage, setStage] = useState("offer"); // offer | explain | downloading
-  if (hidden) return null;
-  const close = () => { apk.dismiss(); setHidden(true); };
-  const closeBtn = (
-    <button aria-label="Fechar" onClick={close} style={{ padding: "4px 6px", fontSize: 18, color: T.inkMuted, alignSelf: "flex-start" }}>✕</button>
-  );
+  const [downloading, setDownloading] = useState(false);
+  useEffect(() => { if (open) setDownloading(false); }, [open]);
+  if (!open || !apk) return null;
   return (
-    <div style={{
-      alignSelf: "stretch", margin: "0 16px 8px", padding: "10px 12px",
-      background: T.canvas, border: `1px solid ${T.blue}`, borderRadius: 4, ...style,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <img src="icons/icon-192.png" alt="" style={{ width: 36, height: 36, borderRadius: 6, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>App FilterTrack para Android</div>
-          <div style={{ fontSize: 12, color: T.inkMuted }}>
-            {stage === "downloading"
-              ? "Baixando… Abra o arquivo para instalar. Se o Android pedir, permita instalar apps pelo Chrome."
-              : "Opcional — o app completo já funciona aqui no Chrome."}
-          </div>
+    <div role="dialog" aria-modal="true" aria-labelledby="apk-dialog-title" onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 100001, background: "rgba(8,12,20,.58)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: 420, background: T.canvas, borderTop: `4px solid ${T.blue}`, boxShadow: "0 12px 36px rgba(0,0,0,.32)", padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <img src="icons/icon-192.png" alt="" style={{ width: 40, height: 40, borderRadius: 8, flexShrink: 0 }} />
+          <div id="apk-dialog-title" style={{ flex: 1, fontSize: 18, fontWeight: 600 }}>App FilterTrack para Android</div>
+          <button onClick={onClose} aria-label="Fechar" style={{ fontSize: 18, color: T.inkMuted, padding: 4 }}>✕</button>
         </div>
-        {stage === "offer" && <Btn size="sm" kind="tertiary" onClick={() => setStage("explain")}>Instalar</Btn>}
-        {closeBtn}
-      </div>
-      {stage === "explain" && (
-        <div style={{ marginTop: 10, fontSize: 13, color: T.ink, lineHeight: 1.45 }}>
-          <div style={{ fontWeight: 600 }}>Você não precisa instalar nada.</div>
-          <div style={{ marginTop: 4, color: T.inkMuted }}>
-            Tudo funciona aqui no Chrome: medição, sessões, filtros, CSV e BI. O app Android é só uma opção que
-            conecta sozinho ao sensor e continua gravando com a tela apagada.
+        {downloading ? (
+          <div style={{ marginTop: 12, fontSize: 14, color: T.inkMuted, lineHeight: 1.45 }}>
+            Baixando… Abra o arquivo para instalar. Se o Android pedir, permita instalar apps pelo Chrome.
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-            <Btn size="sm" onClick={close}>Continuar no Chrome</Btn>
-            <Btn size="sm" kind="tertiary" onClick={() => { apk.download(); setStage("downloading"); }}>
+        ) : (
+          <>
+            <div style={{ marginTop: 12, fontSize: 15, fontWeight: 600 }}>Você não precisa instalar nada.</div>
+            <div style={{ marginTop: 4, fontSize: 14, color: T.inkMuted, lineHeight: 1.45 }}>
+              Tudo funciona aqui no Chrome: medição, sessões, filtros, CSV e BI. O app Android é só uma opção que
+              conecta sozinho ao sensor e continua gravando com a tela apagada.
+            </div>
+          </>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+          <Btn onClick={onClose}>{downloading ? "Fechar" : "Continuar no Chrome"}</Btn>
+          {!downloading && (
+            <Btn kind="tertiary" onClick={() => { apk.download(); setDownloading(true); }}>
               Baixar e instalar mesmo assim
             </Btn>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -2267,7 +2260,7 @@ function webTutorialSteps(pf) {
         ? { title: "Você está no Bluefy ✓", body: "No iPhone o Safari não tem Bluetooth. Use sempre o Bluefy para abrir esta página — é o navegador certo." }
         : { title: "Use o app Bluefy", body: "No iPhone o Safari não tem Bluetooth. Instale o Bluefy (gratuito na App Store) e abra este mesmo endereço nele.", warn: true })
     : pf.android
-      ? { title: "Chrome no Android", body: "Não precisa instalar nada: o app completo funciona aqui no Chrome e conecta ao sensor direto pela página. Se quiser, o app Android (opcional, pelo botão “Instalar” na tela inicial) conecta sozinho e grava com a tela apagada." }
+      ? { title: "Chrome no Android", body: "Não precisa instalar nada: o app completo funciona aqui no Chrome e conecta ao sensor direto pela página. Se quiser, o app Android (opcional, pelo botão “⬇ App” ao lado do “?”) conecta sozinho e grava com a tela apagada." }
       : null;  // no browser card on computers
   return [
     { title: "Bem-vindo ao FilterTrack", body: "Esta página acompanha o nível da água do filtro de areia pelo sensor FilterTrack, via Bluetooth, direto do navegador. São poucos passos." },
@@ -2506,7 +2499,6 @@ function MinimalScreen({ ble, lastDisconnect, filter, flowVelocity, flowInstant,
             {ble.errorMsg || "Mantenha o Bluetooth ligado e aproxime-se do sensor."}
           </div>
         </div>
-        <ApkInstallCard />
         {openFullLink}
       </div>
     );
@@ -2824,6 +2816,11 @@ function App() {
     if (window.__filterTrackGuideRequested) return false;
     try { return localStorage.getItem(WEB_TUTORIAL_SEEN_KEY) !== "1"; } catch (_) { return true; }
   });
+  const [installOpen, setInstallOpen] = useState(() => new URLSearchParams(location.search).get("install") === "1");
+  useEffect(() => {
+    window.FilterTrackOpenInstall = () => setInstallOpen(true);
+    return () => { delete window.FilterTrackOpenInstall; };
+  }, []);
   const closeTutorial = useCallback(() => {
     setTutorialOpen(false);
     try { localStorage.setItem(WEB_TUTORIAL_SEEN_KEY, "1"); } catch (_) {}
@@ -3705,6 +3702,7 @@ function App() {
         <InitialGuide step={guideStep} onNext={advanceInitialGuide} onSkip={skipInitialGuide} />
         <DisconnectPill lastDisconnect={lastDisconnect} connected={appBle.connected} reconnecting={appBle.scanning || appBle.connectionStatus === "Connecting"} />
         <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
+        <ApkInstallDialog open={installOpen} onClose={() => setInstallOpen(false)} />
       </>
     );
   }
@@ -3728,6 +3726,7 @@ function App() {
         />
         <DisconnectPill lastDisconnect={lastDisconnect} connected={appBle.connected} reconnecting={appBle.scanning || appBle.connectionStatus === "Connecting"} />
         <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
+        <ApkInstallDialog open={installOpen} onClose={() => setInstallOpen(false)} />
       </>
     );
   }
@@ -3797,6 +3796,7 @@ function App() {
       />
       <DisconnectPill lastDisconnect={lastDisconnect} connected={appBle.connected} reconnecting={appBle.scanning || appBle.connectionStatus === "Connecting"} />
       <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
+      <ApkInstallDialog open={installOpen} onClose={() => setInstallOpen(false)} />
     </div>
     {sensorWarning && (
       <div role="alert" style={{ position: "fixed", left: 16, right: 16, bottom: 82, zIndex: 9000, maxWidth: 520, margin: "0 auto", padding: "14px 16px", background: "#161616", color: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,.3)", fontSize: 14 }}>

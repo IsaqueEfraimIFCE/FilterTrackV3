@@ -56,7 +56,7 @@
       }).catch(() => {});
     } catch {}
   }
-  remoteLog(`bridge v9 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
+  remoteLog(`bridge v10 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
 
   // Offline shell (sw.js). Not every WebBLE browser allows service workers —
   // Bluefy runs on WKWebView, where they need the host app's opt-in — so
@@ -553,6 +553,24 @@
       <a href="${biLink()}" target="_blank" rel="noopener" style="padding:6px 10px;background:#009ca6;color:#fff;text-decoration:none;border-radius:2px;">BI</a>
       <button data-ft-help aria-label="Tutorial" title="Tutorial" style="width:28px;padding:6px 0;background:#fff;color:#0068B4;border:1px solid #0068B4;border-radius:14px;font:700 12px system-ui,sans-serif;">?</button>
     `;
+    // Android only: optional native app. The button opens index.html's
+    // install dialog, which explains the app already works in Chrome before
+    // offering the download (window.FilterTrackOpenInstall).
+    const apkAvailable = /Android/i.test(navigator.userAgent) &&
+      !(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+    if (apkAvailable) {
+      const install = document.createElement("button");
+      install.setAttribute("data-ft-install", "");
+      install.setAttribute("aria-label", "App Android (opcional)");
+      install.textContent = "⬇ App";
+      install.style.cssText =
+        "padding:6px 10px;background:#fff;color:#0068B4;border:1px solid #0068B4;border-radius:14px;font:600 12px system-ui,sans-serif;";
+      install.onclick = () => {
+        if (typeof window.FilterTrackOpenInstall === "function") window.FilterTrackOpenInstall();
+        else location.href = "index.html?install=1";
+      };
+      bar.appendChild(install);
+    }
     // The tutorial lives in index.html (window.FilterTrackOpenTutorial);
     // from other pages, go there and ask for it.
     bar.querySelector("[data-ft-help]").onclick = () => {
