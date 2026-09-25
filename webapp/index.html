@@ -190,6 +190,9 @@ function normalizeFilterText(value) {
 }
 function getFilterStation(filter) { return String(filter && filter.station ? filter.station : "").trim(); }
 function getFilterLocation(filter) { return String(filter && filter.location ? filter.location : "").trim(); }
+// Sessions saved before business units were hidden store names like
+// "Filtro Asc ETA X UN-BAC 1"; drop the unit code when showing them.
+function displayFilterName(name) { return String(name || "").replace(/\s+UN-[A-Z0-9]+\b/gi, "").trim(); }
 function getFilterBusinessUnit(filter) { return String(filter && filter.businessUnit ? filter.businessUnit : "").trim(); }
 function formatAreaLabel(areaM2) {
   if (areaM2 == null) return "--";
@@ -222,9 +225,13 @@ function normalizeFilterCatalog(filters) {
   const grouped = new Map();
   Array.from(byId.values()).forEach(f => {
     const dir = inferFilterDirection(f);
-    const bn = `Filtro ${dir} ${f.station} ${f.businessUnit}`.replace(/\s+/g, " ").trim();
-    if (!grouped.has(bn)) grouped.set(bn, []);
-    grouped.get(bn).push({ ...f, flowDirection: dir, baseName: bn });
+    // Business units are kept in the data but not shown anywhere (they are
+    // being reorganized); the unit still separates same-named stations when
+    // numbering filters.
+    const groupKey = `${dir} ${f.station} ${f.businessUnit}`;
+    const bn = `Filtro ${dir} ${f.station}`.replace(/\s+/g, " ").trim();
+    if (!grouped.has(groupKey)) grouped.set(groupKey, []);
+    grouped.get(groupKey).push({ ...f, flowDirection: dir, baseName: bn });
   });
   const result = [];
   const itemOrder = (a, b) => {
@@ -1428,7 +1435,6 @@ function MonitorTab({ ble, filter, flowVelocity, flowInstant, flowHistory, flowR
               </div>
               <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 10, overflowWrap: "anywhere" }}>{filter.location}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                <Tag tone="blue">{filter.businessUnit}</Tag>
                 <Tag>Área {formatAreaLabel(filter.areaM2)}</Tag>
               </div>
             </div>
@@ -1564,7 +1570,7 @@ function SessionsTab({ syncState, onSync }) {
           <Tile key={s.id} padding={16}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: 15 }}>{s.filter ? s.filter.name : "Sem filtro"}</div>
+                <div style={{ fontWeight: 500, fontSize: 15 }}>{s.filter ? displayFilterName(s.filter.name) : "Sem filtro"}</div>
                 <div style={{ fontSize: 13, color: T.inkSubtle, marginTop: 2 }}>{s.filter ? s.filter.station : ""}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 12, color: T.inkSubtle, marginTop: 4 }}>
                   {started}{duration > 0 ? ` · ${formatDuration(duration)}` : ""} · {count} amostras
@@ -1617,7 +1623,6 @@ function FiltersTab({ filters, onPick }) {
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <div style={{ fontFamily: T.mono, fontSize: 14 }}>{formatAreaLabel(f.areaM2)}</div>
-                <div style={{ fontSize: 12, color: T.inkSubtle, letterSpacing: 0.32 }}>{f.businessUnit}</div>
               </div>
             </button>
           ))}
@@ -2302,7 +2307,7 @@ function MinimalScreen({ ble, filter, flowVelocity, flowInstant, flowHistory, fl
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 500, fontSize: 15 }}>{filter ? filter.station : (ble.deviceName || "Sensor")}</div>
           <div style={{ fontSize: 12, color: T.inkSubtle }}>
-            {filter ? `${filter.location} · ${filter.businessUnit} · Área ${formatAreaLabel(filter.areaM2)}` : "Sensor conectado"}
+            {filter ? `${filter.location} · Área ${formatAreaLabel(filter.areaM2)}` : "Sensor conectado"}
           </div>
         </div>
         <SignalBars rssi={ble.rssi} />

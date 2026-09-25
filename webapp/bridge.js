@@ -14,6 +14,12 @@
   const CHAR_OTA_UUID = "0000ff02-0000-1000-8000-00805f9b34fb";
   const CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb";
   const BI_URL = "https://filtertrack-api.fly.dev/bi";
+  // BI "user" (read-only) access key, handed to the dashboard in the URL
+  // fragment (#key=...) so it signs in on open. The fragment never reaches
+  // the server. Anyone who can open this web app can read this key.
+  const BI_USER_KEY = "";
+  const biLink = (query = "") =>
+    `${BI_URL}${query}${BI_USER_KEY ? `#key=${encodeURIComponent(BI_USER_KEY)}` : ""}`;
   const OTA_MAX_BYTES = 4 * 1024 * 1024;
   const OTA_CHUNK_BYTES = 180;
 
@@ -360,7 +366,7 @@
     },
 
     openBiDashboard() {
-      window.open(BI_URL, "_blank");
+      window.open(biLink(), "_blank");
     },
 
     openCsvGuide() {
@@ -419,7 +425,7 @@
   // FilterTrackGuide bridge, used only by csv-analysis.html's guide flow.
   window.FilterTrackGuide = {
     openBiGuide() {
-      window.open(`${BI_URL}?guide=1`, "_blank");
+      window.open(biLink("?guide=1"), "_blank");
     },
   };
 
@@ -452,7 +458,7 @@
     bar.innerHTML = `
       <a href="index.html" style="padding:6px 10px;background:#0068B4;color:#fff;text-decoration:none;border-radius:2px;opacity:${isCsv ? 1 : 0.35}">Monitor</a>
       <a href="csv-analysis.html" style="padding:6px 10px;background:#0068B4;color:#fff;text-decoration:none;border-radius:2px;opacity:${isCsv ? 0.35 : 1}">CSV</a>
-      <a href="${BI_URL}" target="_blank" rel="noopener" style="padding:6px 10px;background:#009ca6;color:#fff;text-decoration:none;border-radius:2px;">BI</a>
+      <a href="${biLink()}" target="_blank" rel="noopener" style="padding:6px 10px;background:#009ca6;color:#fff;text-decoration:none;border-radius:2px;">BI</a>
     `;
     document.body.appendChild(bar);
   }
