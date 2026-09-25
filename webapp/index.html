@@ -2246,8 +2246,15 @@ function InitialGuide({ step, onNext, onSkip }) {
 }
 /* ===== APP ROOT ===== */
 /* ===== MINIMAL MODE ===== */
-function MinimalScreen({ ble, filter, flowVelocity, flowInstant, flowHistory, flowReason, flowWaitSeconds, recentSessions, washActive, washEvents, flowStats, velocityUnit, flowUnit, onOpenFull, onDisconnect }) {
+function MinimalScreen({ ble, lastDisconnect, filter, flowVelocity, flowInstant, flowHistory, flowReason, flowWaitSeconds, recentSessions, washActive, washEvents, flowStats, velocityUnit, flowUnit, onOpenFull, onDisconnect }) {
   const connected = !!ble.connected;
+  // Ticks once a second while a disconnect alert is up, for its "há …" age.
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    if (connected || !lastDisconnect) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [connected, lastDisconnect]);
   const vu = velocityUnit || VELOCITY_UNITS[0];
   const fu = flowUnit || FLOW_UNITS[0];
   const hasVelocity = Number.isFinite(flowVelocity);
@@ -2291,6 +2298,28 @@ function MinimalScreen({ ble, filter, flowVelocity, flowInstant, flowHistory, fl
           style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, padding: 24 }}>
           <CageceLogo height={40} />
           <div style={{ fontSize: 22, fontWeight: 600 }}>FilterTrack</div>
+          {lastDisconnect && (
+            <div role="alert" style={{
+              alignSelf: "stretch", maxWidth: 420, margin: "0 auto", padding: "12px 14px",
+              background: "#ffd7d9", color: "#750e13", borderLeft: `4px solid ${T.danger}`, borderRadius: 2,
+            }}>
+              <div style={{ fontWeight: 600, fontSize: 16 }}>Sensor desconectado</div>
+              <div style={{ fontSize: 13, marginTop: 4 }}>
+                {lastDisconnect.deviceName} desconectou às {new Date(lastDisconnect.at).toLocaleTimeString("pt-BR")}
+                {" · há "}{formatDuration(Math.max(0, nowMs - lastDisconnect.at))}
+              </div>
+              <div style={{ fontSize: 13, marginTop: 2 }}>
+                {lastDisconnect.sessionKept
+                  ? "A sessão continua quando o sensor reconectar."
+                  : "A sessão foi salva; a próxima conexão inicia uma nova."}
+              </div>
+              <div style={{ fontSize: 13, marginTop: 6, fontWeight: 500 }}>
+                {ble.scanning || ble.connectionStatus === "Connecting"
+                  ? "Tentando reconectar…"
+                  : "Toque em Procurar dispositivos para reconectar."}
+              </div>
+            </div>
+          )}
           {/* In the browser a scan only starts from a tap (Web Bluetooth), so
               when nothing is searching show the button instead of a spinner
               that would never finish. */}
@@ -2616,6 +2645,12 @@ function App() {
   const [pendingFilterChoice, setPendingFilterChoice] = useState(false);
   const [scanPaused, setScanPaused] = useState(false);
   const [connectionIssue, setConnectionIssue] = useState(null);
+  // Last unexpected sensor disconnect ({ at, deviceName, sessionKept }),
+  // cleared when a sensor connects again.
+  const [lastDisconnect, setLastDisconnect] = useState(null);
+  useEffect(() => {
+    document.title = lastDisconnect ? "Sensor desconectado · FilterTrack" : "FilterTrack";
+  }, [lastDisconnect]);
   const [offlineBrowseMode, setOfflineBrowseMode] = useState(false);
   const [sensorWarning, setSensorWarning] = useState(false);
   const [minimalMode, setMinimalMode] = useState(() => loadText(STORAGE.minimalMode, "1") === "1");
@@ -2996,6 +3031,7 @@ function App() {
     const nowConnected = !!ble.connected;
     if (!prevConnected && nowConnected) {
       setConnectionIssue(null);
+      setLastDisconnect(null);
       const pendingRestartOnly = !!pendingRestartAfterReconnectRef.current;
       const skipFilterChoice = !!restartReconnectNoPickerRef.current || pendingRestartOnly;
       const resumeInterruptedSession = !!continueSessionAfterReconnectRef.current && !!activeSessionRef.current && !pendingRestartOnly;
@@ -3056,6 +3092,12 @@ function App() {
       }
       scanPausedRef.current = false;
       setScanPaused(false);
+      if (!manualDisconnect && !suppressIssue) {
+        // Unexpected drop: remembered for the "Sensor desconectado" alert on
+        // the waiting screen, plus a vibration where the device supports it.
+        setLastDisconnect({ at: Date.now(), deviceName: ble.deviceName || "Sensor", sessionKept: shouldContinueSession });
+        try { navigator.vibrate?.([300, 150, 300]); } catch (_) {}
+      }
       if (!manualDisconnect && !suppressIssue && !minimalModeRef.current) {
         setConnectionIssue({
           type: "connection_lost",
@@ -3460,6 +3502,7 @@ function App() {
       <>
       <MinimalScreen
         ble={appBle}
+        lastDisconnect={lastDisconnect}
         filter={guideActive ? guideFilter : effectiveFilter}
         flowVelocity={displayedVelocity}
         flowInstant={displayedFlow}
