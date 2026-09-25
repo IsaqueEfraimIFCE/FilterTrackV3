@@ -3,12 +3,15 @@
 // by the page once it's back online. Cross-origin requests (the API, fonts)
 // and the /log diagnostics endpoint always go straight to the network.
 
-const CACHE = "filtertrack-shell-v4";
+const CACHE = "filtertrack-shell-v6";
 const SHELL = [
   "./",
   "index.html",
   "csv-analysis.html",
-  "bridge.js?v=4",
+  "bridge.js?v=6",
+  "manifest.webmanifest",
+  "icons/icon-192.png",
+  "icons/icon-512.png",
   "vendor/react.production.min.js",
   "vendor/react-dom.production.min.js",
   "vendor/babel.min.js",

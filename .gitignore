@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Built from app/ without BI keys; served by the webapp install banner
+webapp/FilterTrack.apk
