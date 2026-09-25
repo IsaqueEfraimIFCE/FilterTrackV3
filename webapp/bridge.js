@@ -33,10 +33,28 @@
   const connectDiag = [];
   function diag(msg) {
     connectDiag.push(msg);
+    remoteLog(msg);
     push("onDataReceived", `BRIDGE:${msg}`);
   }
 
+  // Sends a diagnostic line to the server's /log endpoint, which only
+  // records it in the access log. Lets the bridge be debugged on an iPhone,
+  // where Bluefy's JS console can't be reached.
+  const sessionTag = Math.random().toString(36).slice(2, 8);
+  function remoteLog(msg) {
+    try {
+      fetch(`log?s=${sessionTag}&t=${Date.now()}&m=${encodeURIComponent(msg)}`, {
+        cache: "no-store",
+        keepalive: true,
+      }).catch(() => {});
+    } catch {}
+  }
+  remoteLog(`bridge v4 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
+
   function push(method, ...args) {
+    if (method !== "onDataReceived" && method !== "onOtaProgress") {
+      remoteLog(`${method}(${args.map(String).join(", ")})`);
+    }
     try {
       if (window.FilterTrackBridge && typeof window.FilterTrackBridge[method] === "function") {
         window.FilterTrackBridge[method](...args);
@@ -50,9 +68,12 @@
     return !("bluetooth" in navigator);
   }
 
+  let notifyCount = 0;
   function handleNotify(event) {
     const value = event.target.value;
     const text = new TextDecoder("utf-8").decode(value);
+    notifyCount += 1;
+    if (notifyCount <= 5 || notifyCount % 50 === 0) remoteLog(`notify #${notifyCount}: ${text}`);
     push("onDataReceived", text);
 
     // Mirror device-reported OTA state into the dedicated OTA callbacks too,
@@ -66,7 +87,15 @@
     }
   }
 
+  let lastNotifyEvent = null;
+  function handleNotifyOnce(event) {
+    if (event === lastNotifyEvent) return;
+    lastNotifyEvent = event;
+    handleNotify(event);
+  }
+
   function onGattDisconnected() {
+    ready = false;
     cmdChar = null;
     otaChar = null;
     gattServer = null;
@@ -156,8 +185,26 @@
     document.addEventListener(type, () => { lastGestureAt = Date.now(); }, true)
   );
 
+  // Rejects if a GATT step doesn't settle in time. Bluefy has been seen to
+  // leave a call pending forever with the link up, which stalled the connect
+  // flow silently: no notifications, no error, nothing in the debug panel.
+  function withTimeout(promise, ms, label) {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  }
+
+  // True only once the whole connect flow (including startNotifications)
+  // finished, so a second connect() mid-flow can't short-circuit to
+  // "Connected" before notifications are enabled.
+  let ready = false;
+
   async function connectDevice(device, address) {
-    if (device.gatt.connected && cmdChar) {
+    if (device.gatt.connected && ready) {
       // Already connected to this exact device — re-announce state instead
       // of redoing GATT discovery (guards against a double connect() call
       // when startScan() auto-connects and the in-app device list is also
@@ -178,45 +225,41 @@
     device.addEventListener("gattserverdisconnected", onGattDisconnected);
 
     try {
-      const server = await device.gatt.connect();
+      const server = await withTimeout(device.gatt.connect(), 15000, "gatt.connect()");
       gattServer = server;
       activeDevice = device;
       diag("gatt connected, discovering service...");
 
-      const service = await server.getPrimaryService(SERVICE_UUID);
-      cmdChar = await service.getCharacteristic(CHAR_CMD_NOTIFY_UUID);
+      const service = await withTimeout(server.getPrimaryService(SERVICE_UUID), 8000, "getPrimaryService()");
+      cmdChar = await withTimeout(service.getCharacteristic(CHAR_CMD_NOTIFY_UUID), 8000, "getCharacteristic()");
       diag(`characteristic found, properties: notify=${cmdChar.properties.notify} write=${cmdChar.properties.write} writeNoResp=${cmdChar.properties.writeWithoutResponse}`);
 
       // Listener registered before startNotifications(): some WebBLE
-      // polyfills (Bluefy included) are order-sensitive here.
-      cmdChar.addEventListener("characteristicvaluechanged", handleNotify);
-      cmdChar.oncharacteristicvaluechanged = handleNotify;
+      // polyfills (Bluefy included) are order-sensitive here. Both hooks are
+      // set for polyfills that only honor one; handleNotifyOnce drops the
+      // second delivery of the same event where both fire.
+      cmdChar.addEventListener("characteristicvaluechanged", handleNotifyOnce);
+      cmdChar.oncharacteristicvaluechanged = handleNotifyOnce;
 
-      // startNotifications() writes the CCCD (0x2902) itself. Never write the
-      // CCCD directly: Web Bluetooth blocklists it and CoreBluetooth (Bluefy)
-      // forbids it. The firmware must expose a CCCD; without one iOS can't
-      // subscribe and drops every notification while still showing
-      // "Connected".
+      // startNotifications() writes the CCCD (0x2902) itself — no separate
+      // getDescriptor()/CCCD write: Web Bluetooth blocklists CCCD writes,
+      // CoreBluetooth forbids them, and in Bluefy getDescriptor() on the
+      // CCCD never settled, stalling this whole flow.
+      diag("calling startNotifications()...");
       try {
-        await cmdChar.getDescriptor(CCCD_UUID);
-        diag("CCCD present on device");
-      } catch {
-        diag("CCCD MISSING on device — iOS can't subscribe; update the firmware");
-      }
-
-      try {
-        await cmdChar.startNotifications();
+        await withTimeout(cmdChar.startNotifications(), 8000, "startNotifications()");
         diag("startNotifications() resolved OK");
       } catch (notifyErr) {
         diag(`startNotifications() FAILED: ${notifyErr.message || notifyErr}`);
       }
 
       try {
-        otaChar = await service.getCharacteristic(CHAR_OTA_UUID);
+        otaChar = await withTimeout(service.getCharacteristic(CHAR_OTA_UUID), 3000, "getCharacteristic(OTA)");
       } catch {
         otaChar = null;
       }
 
+      ready = true;
       push("onConnectionStateChanged", "Connected", device.name || "FilterTrack", address);
       connectDiag.forEach((msg) => push("onDataReceived", `BRIDGE:${msg}`));
       diag("connected — waiting for first notification...");
