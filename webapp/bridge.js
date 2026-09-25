@@ -56,7 +56,7 @@
       }).catch(() => {});
     } catch {}
   }
-  remoteLog(`bridge v7 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
+  remoteLog(`bridge v8 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
 
   // Offline shell (sw.js). Not every WebBLE browser allows service workers —
   // Bluefy runs on WKWebView, where they need the host app's opt-in — so
@@ -569,44 +569,30 @@
   }
 
   // Android: offer the native app (APK) instead of Chrome's own "Install app"
-  // prompt, which would only add this web page to the home screen. A page
-  // can't install an APK itself — it downloads it, and opening the download
-  // hands it to Android's package installer (which asks the user to confirm,
-  // and the first time to allow installs from Chrome).
+  // prompt, which would only add this web page to the home screen. The offer
+  // is a card on the app's first screen (index.html's ApkInstallCard), shown
+  // until the person closes it. A page can't install an APK itself — it
+  // downloads it, and opening the download hands it to Android's package
+  // installer (which asks to confirm, and the first time to allow installs
+  // from Chrome).
   const APK_URL = "FilterTrack.apk";
   const APK_DISMISS_KEY = "ft_apkBannerDismissed";
   const isAndroid = /Android/i.test(navigator.userAgent);
   const isInstalledShell = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
 
   window.addEventListener("beforeinstallprompt", (e) => {
-    if (!isAndroid) return;
-    e.preventDefault();
-    showApkBanner();
+    if (isAndroid) e.preventDefault();
   });
 
-  function apkBannerDismissed() {
-    try { return localStorage.getItem(APK_DISMISS_KEY) === "1"; } catch { return false; }
-  }
-
-  function showApkBanner() {
-    if (!isAndroid || isInstalledShell || apkBannerDismissed()) return;
-    if (!document.body || document.querySelector("[data-ft-apk-banner]")) return;
-    const bar = document.createElement("div");
-    bar.setAttribute("data-ft-apk-banner", "");
-    bar.style.cssText =
-      "position:fixed;left:8px;right:8px;top:8px;z-index:100000;display:flex;align-items:center;gap:10px;" +
-      "padding:10px 12px;background:#fff;border:1px solid #0068B4;border-radius:4px;" +
-      "box-shadow:0 4px 12px rgba(0,0,0,.15);font:14px system-ui,sans-serif;color:#161616;";
-    bar.innerHTML = `
-      <img src="icons/icon-192.png" alt="" style="width:36px;height:36px;border-radius:6px;flex-shrink:0">
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:600">App FilterTrack para Android</div>
-        <div data-ft-apk-hint style="font-size:12px;color:#525252">Conexão automática e gravação em segundo plano.</div>
-      </div>
-      <button data-ft-apk-install style="padding:8px 14px;background:#0068B4;color:#fff;border:0;border-radius:2px;font:600 14px system-ui,sans-serif">Instalar</button>
-      <button data-ft-apk-close aria-label="Fechar" style="padding:4px 8px;background:none;border:0;font-size:18px;color:#525252">✕</button>
-    `;
-    bar.querySelector("[data-ft-apk-install]").onclick = () => {
+  window.FilterTrackApk = {
+    available: isAndroid && !isInstalledShell,
+    dismissed() {
+      try { return localStorage.getItem(APK_DISMISS_KEY) === "1"; } catch { return false; }
+    },
+    dismiss() {
+      try { localStorage.setItem(APK_DISMISS_KEY, "1"); } catch {}
+    },
+    download() {
       remoteLog("apk download started");
       const a = document.createElement("a");
       a.href = APK_URL;
@@ -614,21 +600,6 @@
       document.body.appendChild(a);
       a.click();
       a.remove();
-      bar.querySelector("[data-ft-apk-hint]").textContent =
-        "Baixando… Abra o arquivo para instalar. Se o Android pedir, permita instalar apps pelo Chrome.";
-    };
-    bar.querySelector("[data-ft-apk-close]").onclick = () => {
-      try { localStorage.setItem(APK_DISMISS_KEY, "1"); } catch {}
-      bar.remove();
-    };
-    document.body.appendChild(bar);
-  }
-
-  // Chrome only fires beforeinstallprompt when its install criteria are met,
-  // so show the offer on Android regardless once the page is up.
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", showApkBanner);
-  } else {
-    showApkBanner();
-  }
+    },
+  };
 })();

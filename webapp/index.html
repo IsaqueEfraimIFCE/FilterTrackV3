@@ -15,8 +15,8 @@
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
 <script src="vendor/babel.min.js"></script>
-<script src="bi-config.js?v=7"></script>
-<script src="bridge.js?v=7"></script>
+<script src="bi-config.js?v=8"></script>
+<script src="bridge.js?v=8"></script>
 <style>
 :root {
   --cagece-blue: #0068B4; --cagece-blue-hover: #0058a0; --cagece-blue-active: #00477f;
@@ -1089,6 +1089,7 @@ function ConnectScreen({ ble, autoConnectDevice, isPreferredDevice = () => false
               : "O app procura e conecta automaticamente ao sensor BLE FilterTrack instalado na ETA."}
           </p>
         </div>
+        <ApkInstallCard style={{ margin: 0 }} />
 
         {manualDeviceChoice ? <StatusInline kind="warning">Toque no sensor correto para continuar. A conexao automatica fica pausada enquanto houver mais de um FilterTrackV3 visivel.</StatusInline> : null}
         {ble.errorMsg ? <StatusInline kind="danger">{ble.errorMsg}</StatusInline> : null}
@@ -2155,6 +2156,58 @@ function FilterPickerOverlay({ filters, suggestedFilter, onPick, onClose }) {
 }
 
 /* ===== INTERACTIVE GUIDE ===== */
+/* ===== ANDROID APP INSTALL CARD =====
+   Offer of the native Android app (APK) on the first screen, kept until the
+   person closes it (bridge.js's window.FilterTrackApk does the download). */
+// Installing is optional: the whole app works in Chrome. Tapping "Instalar"
+// first explains that; the APK downloads only from the explicit
+// "Baixar e instalar mesmo assim" button.
+function ApkInstallCard({ style }) {
+  const apk = window.FilterTrackApk;
+  const [hidden, setHidden] = useState(() => !apk || !apk.available || apk.dismissed());
+  const [stage, setStage] = useState("offer"); // offer | explain | downloading
+  if (hidden) return null;
+  const close = () => { apk.dismiss(); setHidden(true); };
+  const closeBtn = (
+    <button aria-label="Fechar" onClick={close} style={{ padding: "4px 6px", fontSize: 18, color: T.inkMuted, alignSelf: "flex-start" }}>✕</button>
+  );
+  return (
+    <div style={{
+      alignSelf: "stretch", margin: "0 16px 8px", padding: "10px 12px",
+      background: T.canvas, border: `1px solid ${T.blue}`, borderRadius: 4, ...style,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <img src="icons/icon-192.png" alt="" style={{ width: 36, height: 36, borderRadius: 6, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>App FilterTrack para Android</div>
+          <div style={{ fontSize: 12, color: T.inkMuted }}>
+            {stage === "downloading"
+              ? "Baixando… Abra o arquivo para instalar. Se o Android pedir, permita instalar apps pelo Chrome."
+              : "Opcional — o app completo já funciona aqui no Chrome."}
+          </div>
+        </div>
+        {stage === "offer" && <Btn size="sm" kind="tertiary" onClick={() => setStage("explain")}>Instalar</Btn>}
+        {closeBtn}
+      </div>
+      {stage === "explain" && (
+        <div style={{ marginTop: 10, fontSize: 13, color: T.ink, lineHeight: 1.45 }}>
+          <div style={{ fontWeight: 600 }}>Você não precisa instalar nada.</div>
+          <div style={{ marginTop: 4, color: T.inkMuted }}>
+            Tudo funciona aqui no Chrome: medição, sessões, filtros, CSV e BI. O app Android é só uma opção que
+            conecta sozinho ao sensor e continua gravando com a tela apagada.
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            <Btn size="sm" onClick={close}>Continuar no Chrome</Btn>
+            <Btn size="sm" kind="tertiary" onClick={() => { apk.download(); setStage("downloading"); }}>
+              Baixar e instalar mesmo assim
+            </Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ===== DISCONNECT PILL =====
    Small yellow warning at the top of every screen once the sensor has been
    unexpectedly disconnected for more than 1 s (quick blips that reconnect
@@ -2206,13 +2259,11 @@ function webTutorialSteps(pf) {
         ? { title: "Você está no Bluefy ✓", body: "No iPhone o Safari não tem Bluetooth. Use sempre o Bluefy para abrir esta página — é o navegador certo." }
         : { title: "Use o app Bluefy", body: "No iPhone o Safari não tem Bluetooth. Instale o Bluefy (gratuito na App Store) e abra este mesmo endereço nele.", warn: true })
     : pf.android
-      ? { title: "Chrome no Android", body: "O Chrome conecta ao sensor direto pela página. Para conexão automática e gravação com a tela apagada, instale o app Android pelo aviso “Instalar” no topo." }
-      : { title: "Chrome no computador", body: pf.bluetooth
-          ? "Este navegador tem Bluetooth. Deixe a página aberta: no computador ela continua recebendo dados mesmo em segundo plano (evite que o notebook entre em suspensão)."
-          : "Este navegador não tem Bluetooth. Use o Chrome ou o Edge.", warn: !pf.bluetooth };
+      ? { title: "Chrome no Android", body: "Não precisa instalar nada: o app completo funciona aqui no Chrome e conecta ao sensor direto pela página. Se quiser, o app Android (opcional, pelo botão “Instalar” na tela inicial) conecta sozinho e grava com a tela apagada." }
+      : null;  // no browser card on computers
   return [
     { title: "Bem-vindo ao FilterTrack", body: "Esta página acompanha o nível da água do filtro de areia pelo sensor FilterTrack, via Bluetooth, direto do navegador. São poucos passos." },
-    browserStep,
+    ...(browserStep ? [browserStep] : []),
     { title: "Conectar ao sensor", body: pf.ios
         ? "A página procura o sensor sozinha. Na lista que aparece, toque em FilterTrackV3. A conexão e as leituras começam em seguida."
         : "Toque em “Procurar dispositivos” (ou em qualquer lugar da tela de espera) e escolha FilterTrackV3 na lista. A conexão e as leituras começam em seguida." },
@@ -2447,6 +2498,7 @@ function MinimalScreen({ ble, lastDisconnect, filter, flowVelocity, flowInstant,
             {ble.errorMsg || "Mantenha o Bluetooth ligado e aproxime-se do sensor."}
           </div>
         </div>
+        <ApkInstallCard />
         {openFullLink}
       </div>
     );
