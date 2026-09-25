@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FilterTrack · Analisador de vazão</title>
+  <script src="bridge.js"></script>
+  <style>
+    :root { color-scheme:light; --blue:#0068b4; --blue-dark:#00477f; --teal:#009ca6; --canvas:#fff; --surface:#f4f4f4; --line:#e0e0e0; --line-strong:#8d8d8d; --text:#161616; --muted:#525252; --subtle:#6f6f6f; --good:#198038; --warn:#b28600; --danger:#da1e28; }
+    * { box-sizing:border-box }
+    html,body { margin:0; min-height:100%; background:var(--surface); color:var(--text); font:16px "IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    body { overflow-x:hidden }
+    .appHeader { position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:12px; min-height:68px; padding:12px 16px; background:var(--canvas); border-bottom:1px solid var(--line); }
+    .brandMark { width:auto; height:38px; max-width:104px; object-fit:contain; display:block; }
+    .appHeader strong { display:block; font-size:17px; font-weight:600; line-height:1.2; }
+    .appHeader span { display:block; margin-top:2px; color:var(--subtle); font-size:13px; }
+    main { width:100%; max-width:980px; margin:auto; padding:20px 16px 40px; }
+    .eyebrow { color:var(--blue); font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+    h1 { margin:4px 0 16px; font-size:30px; font-weight:300; line-height:1.15; }
+    .card { margin:12px 0; padding:16px; background:var(--canvas); border:1px solid var(--line); box-shadow:0 2px 6px rgba(0,0,0,.05); }
+    .controls { display:grid; grid-template-columns:1.35fr 1.5fr .65fr; gap:12px; align-items:end; }
+    label { display:grid; gap:7px; color:var(--muted); font-size:13px; font-weight:600; letter-spacing:.02em; }
+    input,select,button { width:100%; min-height:48px; border:1px solid var(--line-strong); border-radius:0; background:var(--canvas); color:var(--text); font:inherit; padding:0 12px; }
+    input:focus,select:focus,button:focus-visible { outline:2px solid #0f62fe; outline-offset:1px; }
+    input[type=file] { padding:10px; }
+    button { cursor:pointer; border-color:var(--blue); background:var(--blue); color:#fff; font-weight:600; }
+    button:active { background:var(--blue-dark); }
+    #status { min-height:24px; margin-top:11px; color:var(--muted); font-size:14px; font-weight:600; }
+    #chartWrap { min-height:400px; position:relative; }
+    canvas { width:100%; height:410px; display:block; touch-action:manipulation; cursor:crosshair; }
+    .result { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; margin-top:13px; background:var(--line); border:1px solid var(--line); }
+    .metric { min-height:92px; padding:13px; background:var(--canvas); }
+    .metric b { display:block; margin-bottom:8px; color:var(--muted); font-size:12px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; }
+    .metric span { font:500 19px "IBM Plex Mono",Consolas,monospace; }
+    .positive { color:var(--good); }
+    .negative { color:var(--danger); }
+    .pointList { margin:14px 0 0; color:var(--muted); font-size:14px; line-height:1.65; }
+    .pointList strong { color:var(--text); }
+    .empty { color:var(--warn); }
+    .guideOverlay { position:fixed; inset:0; z-index:9999; display:none; pointer-events:none; background:transparent; padding:0; }
+    .guideOverlay.show { display:block; }
+    .guideSpotlight { position:fixed; border:3px solid #57a4ff; box-shadow:0 0 0 9999px rgba(3,8,16,.62),0 0 0 5px rgba(87,164,255,.3); pointer-events:none; transition:all .25s ease; }
+    .guideCard { position:fixed; left:12px; right:12px; width:auto; max-width:560px; margin:0 auto; background:#fff; color:#161616; border-top:4px solid var(--blue); padding:18px; box-shadow:0 12px 36px rgba(0,0,0,.35); pointer-events:auto; }
+    .guideStep { color:var(--blue); font-size:12px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+    .guideCard h2 { margin:7px 0; font-size:21px; }
+    .guideCard p { margin:0 0 12px; line-height:1.45; }
+    .guideCard button { width:100%; border:0; background:var(--blue); color:#fff; }
+    @media(max-width:620px) { main { padding:16px 10px 28px; } .controls { grid-template-columns:1fr; } .result { grid-template-columns:1fr 1fr; } canvas { height:330px; } #chartWrap { min-height:330px; } }
+  </style>
+</head>
+<body><div id="initialGuide" class="guideOverlay" role="dialog" aria-modal="true" aria-labelledby="csvGuideTitle">
+  <div id="csvGuideSpotlight" class="guideSpotlight"></div>
+  <div id="csvGuideCard" class="guideCard">
+    <div id="csvGuideStep" class="guideStep"></div>
+    <h2 id="csvGuideTitle"></h2>
+    <p id="csvGuideBody"></p>
+    <button id="csvGuideNext" type="button">Continuar</button>
+  </div>
+</div><header class="appHeader">
+  <img class="brandMark" src="logo_cagece.png" alt="" aria-hidden="true">
+  <div><strong>FilterTrack</strong><span>Análise offline</span></div>
+</header>
+<main>
+  <div class="eyebrow">Dados de medição</div>
+  <h1>Analisador CSV</h1>
+  <section class="card controls">
+    <label>Arquivo<input id="file" type="file" accept="*/*"></label>
+    <label>Modo de análise<select id="mode">
+      <option value="raw">Leituras brutas</option>
+      <option value="robust" selected>Média robusta centrada (10 s)</option>
+      <option value="standardDistance">Distância pós-processada (MAD)</option>
+      <option value="standardFlow">Vazão padrão (regressão de 10 s)</option>
+      <option value="physicsDistance">Nível físico restrito</option>
+      <option value="physicsFlow">Vazão física (regressão de 30 s)</option>
+    </select></label>
+    <label>Área (m²)<input id="area" type="number" min="0.001" step="0.01" value="3.15"></label>
+  </section>
+  <section class="card">
+    <div id="chartWrap"><canvas id="chart"></canvas></div>
+    <div id="status"></div>
+  </section>
+  <section class="card">
+    <strong>Pontos selecionados</strong>
+    <div class="result">
+      <div class="metric"><b>Intervalo</b><span id="deltaTime">—</span></div>
+      <div class="metric"><b>Variação da distância</b><span id="deltaDistance">—</span></div>
+      <div class="metric"><b>Velocidade</b><span id="velocity">—</span></div>
+      <div class="metric"><b>Vazão</b><span id="flow">—</span></div>
+    </div>
+    <div id="points" class="pointList">Selecione dois pontos no gráfico.</div>
+  </section>
+</main>
+<script>
+(() => {
+  if (new URLSearchParams(location.search).get('guide') === '1') document.getElementById('initialGuide')?.classList.add('show');
+  const $ = id => document.getElementById(id);  const csvGuideSteps = [
+    { step:'Guia · 10 de 13', target:'.controls', title:'Escolha os dados e o método', body:'Use Arquivo para carregar outro CSV, selecione o processamento e confira a área do filtro.' },
+    { step:'Guia · 11 de 13', target:'#chartWrap', title:'Inspecione a curva real', body:'O exemplo da ETA Primavera já está carregado. Toque em dois pontos da curva para comparar o intervalo.' },
+    { step:'Guia · 12 de 13', target:'.result', title:'Compare os resultados', body:'Aqui aparecem variação de distância, velocidade e vazão calculadas entre os dois pontos.' },
+  ];
+  let csvGuideIndex = 0;
+  const positionCsvGuide = () => {
+    const item=csvGuideSteps[csvGuideIndex], target=document.querySelector(item.target); if(!target)return;
+    target.scrollIntoView({behavior:'smooth',block:'center'});
+    setTimeout(()=>{const r=target.getBoundingClientRect(),spot=$('csvGuideSpotlight'),card=$('csvGuideCard');spot.style.left=(r.left-5)+'px';spot.style.top=(r.top-5)+'px';spot.style.width=(r.width+10)+'px';spot.style.height=(r.height+10)+'px';if(r.top>innerHeight/2){card.style.top='auto';card.style.bottom=Math.max(12,innerHeight-r.top+10)+'px'}else{card.style.bottom='auto';card.style.top=Math.min(innerHeight-230,r.bottom+10)+'px'}},160);
+    $('csvGuideStep').textContent=item.step;$('csvGuideTitle').textContent=item.title;$('csvGuideBody').textContent=item.body;$('csvGuideNext').textContent=csvGuideIndex===csvGuideSteps.length-1?'Abrir painel BI':'Continuar';
+  };
+  const startCsvGuide = () => { $('initialGuide').classList.add('show'); csvGuideIndex=0; positionCsvGuide(); };
+  const canvas = $('chart'), ctx = canvas.getContext('2d');  $('csvGuideNext').addEventListener('click',()=>{if(csvGuideIndex<csvGuideSteps.length-1){csvGuideIndex++;positionCsvGuide()}else if(window.FilterTrackGuide){window.FilterTrackGuide.openBiGuide()}});
+  window.addEventListener('resize',()=>{if($('initialGuide').classList.contains('show'))positionCsvGuide()});
+  let rawRows = [], current = [], picks = [], chartBox = null, dataLabel = '';
+  const modes = { raw:'Leituras brutas', robust:'Média robusta centrada', standardDistance:'Distância pós-processada', standardFlow:'Vazão padrão', physicsDistance:'Nível físico restrito', physicsFlow:'Vazão física' };
+  const colors = ['#0068b4','#009ca6','#8a3ffc','#198038'];
+  const number = v => { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
+  const median = values => { const a=[...values].filter(Number.isFinite).sort((a,b)=>a-b); return a.length ? a[Math.floor(a.length/2)] : NaN; };
+  const robust = values => { const a=values.filter(Number.isFinite); if (!a.length) return NaN; if (a.length<3) return a[a.length-1]; const m=median(a), mad=median(a.map(v=>Math.abs(v-m))), inliers=a.filter(v=>Math.abs(v-m)<=Math.max(mad*3,.5)); return inliers.length ? inliers.reduce((s,v)=>s+v,0)/inliers.length : m; };
+  const parseCsv = text => { const lines=text.replace(/^\uFEFF/,'').trim().split(/\r?\n/); if(lines.length<2) throw Error('O CSV não contém linhas de dados.'); const parseLine=line=>{const out=[];let q=false,s='',i=0;for(;i<line.length;i++){const c=line[i];if(c==='"'){if(q&&line[i+1]==='"'){s+='"';i++}else q=!q}else if(c===','&&!q){out.push(s);s=''}else s+=c}out.push(s);return out}; const headers=parseLine(lines[0]); return lines.slice(1).map(parseLine).filter(v=>v.length).map(values=>Object.fromEntries(headers.map((h,i)=>[h,values[i]??'']))); };
+  const normalize = rows => rows.map((row,index)=>{ const timestamp=new Date(row.timestamp).getTime(), distance=number(row.distanceCm ?? row.distance_cm); return { timestamp,distanceCm:distance,source:row.source_file||row.sessionId||'CSV',row:index+2,original:row }; }).filter(p=>Number.isFinite(p.timestamp)&&Number.isFinite(p.distanceCm)&&p.distanceCm>=25).sort((a,b)=>a.timestamp-b.timestamp);
+  const storedSessionRows = session => {
+    if (!session || !session.samples) return [];
+    const source = session.id || 'Última medição';
+    const samples = session.samples;
+    if (samples.format === 'distance_cm_x100_v1' && Array.isArray(samples.t) && Array.isArray(samples.d)) {
+      const t0=Number(samples.t0), scale=Number(samples.scale)||100, n=Math.min(samples.t.length,samples.d.length);
+      if (!Number.isFinite(t0)) return [];
+      return Array.from({length:n},(_,i)=>({timestamp:new Date(t0+Number(samples.t[i])).toISOString(),distanceCm:Number(samples.d[i])/scale,sessionId:source}));
+    }
+    if (Array.isArray(samples)) return samples.map(p=>({timestamp:new Date(Number(p.ts)||Date.parse(p.timestamp)).toISOString(),distanceCm:p.distanceCm??p.distance,sessionId:source}));
+    return [];
+  };
+  const sessionTime = session => {
+    const rows=storedSessionRows(session), last=rows.at(-1);
+    return last ? Date.parse(last.timestamp) : Date.parse(session?.endedAt||session?.startedAt||'')||0;
+  };
+  const loadLatestStored = () => {
+    const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key)||JSON.stringify(fallback))}catch(_){return fallback}};
+    const active=read('filtertrack.activeSession.v1',null), archive=read('filtertrack.sessionArchive.v1',[]);
+    const candidates=[active,...(Array.isArray(archive)?archive:[])].filter(Boolean).sort((a,b)=>sessionTime(b)-sessionTime(a));
+    for(const session of candidates){
+      const rows=normalize(storedSessionRows(session));
+      if(rows.length>=2){
+        const area=Number(session.filter?.areaM2); if(Number.isFinite(area)&&area>0)$('area').value=area;
+        return {rows,label:`Última medição · ${new Date(rows.at(-1).timestamp).toLocaleString('pt-BR')}`};
+      }
+    }
+    return null;
+  };
+  const groups = rows => { const map=new Map(); rows.forEach(r=>{const key=r.sessionKey||r.original?.sessionId||r.source; if(!map.has(key))map.set(key,[]); map.get(key).push(r)}); return [...map.values()]; };
+  const withSeries = series => series.map((p,i)=>({...p, id:i}));
+  const centeredRobust = rows => groups(rows).flatMap(group => group.map(point => { const nearby=group.filter(p=>Math.abs(p.timestamp-point.timestamp)<=5000).map(p=>p.distanceCm); return {...point,distanceCm:robust(nearby),value:robust(nearby)}; })).filter(p=>Number.isFinite(p.value));
+  const standardDistance = rows => groups(rows).flatMap(group => { const bySecond=new Map(), sessionKey=group[0].original?.sessionId||group[0].source; group.forEach(p=>{const s=Math.round(p.timestamp/1000)*1000; if(!bySecond.has(s))bySecond.set(s,[]);bySecond.get(s).push(p.distanceCm)}); return [...bySecond.keys()].sort((a,b)=>a-b).map(t=>{const values=[]; group.forEach(p=>{if(Math.abs(p.timestamp-t)<=5000)values.push(p.distanceCm)}); const m=robust(values), mad=median(values.map(v=>Math.abs(v-m))); return {timestamp:t,distanceCm:m,value:m,source:group[0].source,sessionKey,row:group[0].row, localMad:mad}; }).filter(p=>Number.isFinite(p.value)&&p.localMad<=1.5); });
+  const regression = (points, seconds, minPoints) => { const out=[]; groups(points).forEach(group=>group.forEach(point=>{const window=group.filter(p=>p.timestamp>=point.timestamp-seconds*1000&&p.timestamp<=point.timestamp); if(window.length<minPoints) return; const span=(window.at(-1).timestamp-window[0].timestamp)/1000; if(span<seconds*.8)return; const x=window.map(p=>(p.timestamp-window[0].timestamp)/1000), y=window.map(p=>p.distanceCm), mx=x.reduce((a,v)=>a+v,0)/x.length,my=y.reduce((a,v)=>a+v,0)/y.length, denom=x.reduce((s,v)=>s+(v-mx)**2,0); if(!denom)return; const slope=x.reduce((s,v,i)=>s+(v-mx)*(y[i]-my),0)/denom; const velocity=-slope*.6, motion=y.at(-1)-y[0]; if(seconds===10&&(Math.abs(motion)<.1||Math.abs(velocity)>10))return; out.push({...point,value:velocity*Number($('area').value||3.15)*1000,velocity,windowStart:window[0].timestamp}); })); return out; };
+  const clusters = values => { const sorted=[...values].sort((a,b)=>a-b), output=[]; sorted.forEach(v=>{const last=output.at(-1);if(last&&v-last.at(-1)<=3)last.push(v);else output.push([v])});return output.map(a=>({level:median(a),support:a.length})); };
+  const physicalDistance = rows => groups(rows).flatMap(group=>{const seconds=new Map(), sessionKey=group[0].original?.sessionId||group[0].source;group.forEach(p=>{const t=Math.floor(p.timestamp/1000)*1000;if(!seconds.has(t))seconds.set(t,[]);seconds.get(t).push(p.distanceCm)});const selected=[];[...seconds.keys()].sort((a,b)=>a-b).forEach(t=>{const candidates=clusters(seconds.get(t));if(!candidates.length)return;let chosen;if(!selected.length)chosen=[...candidates].sort((a,b)=>b.support-a.support||a.level-b.level)[0];else{const previous=selected.at(-1), recent=selected.filter(p=>p.timestamp>=t-10000), reference=median(recent.map(p=>p.distanceCm)), allowed=Math.max((t-previous.timestamp)/1000,1);const viable=candidates.filter(c=>Math.abs(c.level-previous.distanceCm)<=allowed);if(!viable.length)return;chosen=[...viable].sort((a,b)=>Math.abs(a.level-reference)-Math.abs(b.level-reference)||b.support-a.support)[0]}selected.push({timestamp:t,distanceCm:chosen.level,value:chosen.level,source:group[0].source,sessionKey,row:group[0].row})});return selected;});
+  const compute = () => { if(!rawRows.length)return []; const mode=$('mode').value; if(mode==='raw')return rawRows.map(p=>({...p,value:p.distanceCm})); if(mode==='robust')return centeredRobust(rawRows); const standard=standardDistance(rawRows); if(mode==='standardDistance')return standard; if(mode==='standardFlow')return regression(standard,10,2); const physical=physicalDistance(rawRows); return mode==='physicsDistance'?physical:regression(physical,30,15); };
+  const labelUnit = () => $('mode').value.includes('Flow') ? 'Vazão (L/min)' : 'Distância (cm)';
+  const refresh = () => { current=withSeries(compute()); picks=current.length>=2?[current[0],current.at(-1)]:[]; renderResults(); draw(); $('status').textContent=current.length ? dataLabel : 'Sem dados'; };
+  const formatTime = t => new Date(t).toLocaleString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const draw = () => { const rect=canvas.getBoundingClientRect(), dpr=devicePixelRatio||1;canvas.width=Math.max(1,Math.round(rect.width*dpr));canvas.height=Math.max(1,Math.round(rect.height*dpr));ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,rect.width,rect.height);if(!current.length){ctx.fillStyle='#6f6f6f';ctx.font='14px system-ui';ctx.fillText('Carregue um CSV FilterTrack.',18,32);return}const pad={l:52,r:14,t:20,b:36},w=rect.width-pad.l-pad.r,h=rect.height-pad.t-pad.b,xs=current.map(p=>p.timestamp),ys=current.map(p=>p.value),xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys),xr=xmax-xmin||1,yr=ymax-ymin||1,margin=yr*.06||1;const sy=v=>pad.t+h-(v-(ymin-margin))/(yr+2*margin)*h,sx=v=>pad.l+(v-xmin)/xr*w;chartBox={pad,w,h,xmin,xmax,ymin:ymin-margin,ymax:ymax+margin,sx,sy};ctx.strokeStyle='#e0e0e0';ctx.lineWidth=1;ctx.fillStyle='#6f6f6f';ctx.font='11px system-ui';for(let i=0;i<5;i++){const y=pad.t+h*i/4;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+w,y);ctx.stroke();const val=(ymax+margin)-(y-pad.t)/h*(yr+2*margin);ctx.fillText(val.toFixed(Math.abs(val)<10?2:0),4,y+4)}ctx.fillText(labelUnit(),pad.l,12);ctx.fillText(formatTime(xmin),pad.l,rect.height-10);ctx.fillText(formatTime(xmax),pad.l+w-70,rect.height-10);const sourceIndex=new Map();current.forEach(p=>{if(!sourceIndex.has(p.source))sourceIndex.set(p.source,sourceIndex.size);ctx.fillStyle=colors[sourceIndex.get(p.source)%colors.length];ctx.globalAlpha=.75;ctx.beginPath();ctx.arc(sx(p.timestamp),sy(p.value),current.length>1200?1.4:2.2,0,Math.PI*2);ctx.fill()});ctx.globalAlpha=1;picks.forEach((p,i)=>{ctx.strokeStyle=i?'#b28600':'#198038';ctx.lineWidth=3;ctx.beginPath();ctx.arc(sx(p.timestamp),sy(p.value),7,0,Math.PI*2);ctx.stroke()}); };
+  const renderResults = () => { const [a,b]=picks;if(!a||!b){['deltaTime','deltaDistance','velocity','flow'].forEach(id=>$(id).textContent='—');$('points').innerHTML='Selecione dois pontos no gráfico.';return}const first=a.timestamp<=b.timestamp?a:b,second=first===a?b:a,dt=(second.timestamp-first.timestamp)/1000, dd=second.distanceCm-first.distanceCm, velocity=dt?-(dd/100)*60/dt:NaN,flow=velocity*Number($('area').value||3.15)*1000;$('deltaTime').textContent=`${dt.toFixed(2)} s`;$('deltaDistance').textContent=`${dd.toFixed(2)} cm`;$('velocity').textContent=Number.isFinite(velocity)?`${velocity.toFixed(4)} m/min`:'—';$('flow').textContent=Number.isFinite(flow)?`${flow.toFixed(1)} L/min`:'—';$('velocity').className=velocity>=0?'positive':'negative';$('flow').className=flow>=0?'positive':'negative';$('points').innerHTML=`<strong>Ponto 1:</strong> ${formatTime(first.timestamp)} · ${first.distanceCm.toFixed(3)} cm &nbsp; <strong>Ponto 2:</strong> ${formatTime(second.timestamp)} · ${second.distanceCm.toFixed(3)} cm`; };
+  canvas.addEventListener('click',event=>{if(!chartBox||!current.length)return;const r=canvas.getBoundingClientRect(),x=event.clientX-r.left,y=event.clientY-r.top;let best=null,bestDistance=Infinity;current.forEach(p=>{const dx=(chartBox.sx(p.timestamp)-x)/chartBox.w,dy=(chartBox.sy(p.value)-y)/chartBox.h,d=dx*dx+dy*dy;if(d<bestDistance){bestDistance=d;best=p}});if(bestDistance>.03)return;if(picks.length===2)picks=[];picks.push(best);renderResults();draw();});
+  const readFile = file => typeof file.text === 'function' ? file.text() : new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error||Error('Não foi possível ler o arquivo.'));reader.readAsText(file);});
+  const bootstrap = async () => {
+    const stored=loadLatestStored();
+    if(stored){rawRows=stored.rows;dataLabel=stored.label;refresh();return}
+    try{const response=await fetch('filtertrack-samples.csv');if(!response.ok)throw Error(String(response.status));rawRows=normalize(parseCsv(await response.text()));dataLabel='Exemplo · ETA Primavera';refresh()}
+    catch(_){rawRows=[];current=[];$('status').textContent='Sem dados';draw()}
+  };
+  $('file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{rawRows=normalize(parseCsv(await readFile(file)));if(!rawRows.length)throw Error('Sem dados');dataLabel=file.name;refresh()}catch(_){rawRows=[];current=[];draw();$('status').textContent='Sem dados'}});$('mode').addEventListener('change',refresh);$('area').addEventListener('change',()=>{if(rawRows.length)refresh()});window.addEventListener('resize',draw);bootstrap();
+  if (new URLSearchParams(location.search).get('guide') === '1') setTimeout(startCsvGuide, 250);})();
+</script>
+</body>
+</html>
