@@ -810,7 +810,15 @@ function useBLE() {
 }
 
 /* ===== SYNC FUNCTIONS ===== */
+let syncInFlight = false;
 async function syncSessions(serverUrl, setSyncState, originLabel = "startup") {
+  // One upload pass at a time: overlapping passes read the same queue and
+  // would POST the same sessions twice.
+  if (syncInFlight) return;
+  syncInFlight = true;
+  try { await syncSessionsOnce(serverUrl, setSyncState); } finally { syncInFlight = false; }
+}
+async function syncSessionsOnce(serverUrl, setSyncState) {
   const pending = readPendingSessions();
   if (!pending.length) {
     setSyncState(s => ({ ...s, status: "idle", pendingCount: 0, message: "Sem sessões pendentes." }));
@@ -830,7 +838,8 @@ async function syncSessions(serverUrl, setSyncState, originLabel = "startup") {
       sent++;
     } catch (err) { remaining.push(session); lastError = err?.message || "Falha"; }
   }
-  writePendingSessions(remaining);
+  // Keep sessions queued while this pass was uploading (not in `pending`).
+  writePendingSessions([...remaining, ...readPendingSessions().filter(s => !pending.some(p => p && s && p.id === s.id))]);
   const lastSyncAt = sent > 0 ? nowIso() : loadText(STORAGE.lastSyncAt, "");
   if (sent > 0) saveText(STORAGE.lastSyncAt, lastSyncAt);
   const status = remaining.length === 0 ? "success" : sent > 0 ? "partial" : "error";
@@ -2923,6 +2932,18 @@ function App() {
     }
     syncSessions(serverUrl, setSyncState, "startup");
     syncFilterCatalog(serverUrl, setFilters);
+  }, [serverUrl]);
+
+  // Sessions recorded offline sit in the pending queue; send them as soon as
+  // the connection returns, and retry every minute while any remain.
+  useEffect(() => {
+    const retry = () => {
+      if (navigator.onLine === false || !readPendingSessions().length) return;
+      syncSessions(serverUrl, setSyncState, "retry");
+    };
+    window.addEventListener("online", retry);
+    const id = setInterval(retry, 60000);
+    return () => { window.removeEventListener("online", retry); clearInterval(id); };
   }, [serverUrl]);
 
   useEffect(() => {

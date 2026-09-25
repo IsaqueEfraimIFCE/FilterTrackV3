@@ -51,6 +51,23 @@
   }
   remoteLog(`bridge v4 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
 
+  // Offline shell (sw.js). Not every WebBLE browser allows service workers —
+  // Bluefy runs on WKWebView, where they need the host app's opt-in — so
+  // report what happened; the page works the same online either way.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker
+      .register("sw.js")
+      .then((reg) => remoteLog(`service worker registered (scope ${reg.scope})`))
+      .catch((e) => remoteLog(`service worker FAILED: ${e.message || e}`));
+  } else {
+    remoteLog("service worker unsupported in this browser");
+  }
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist()
+      .then((granted) => remoteLog(`persistent storage: ${granted}`))
+      .catch(() => {});
+  }
+
   function push(method, ...args) {
     if (method !== "onDataReceived" && method !== "onOtaProgress") {
       remoteLog(`${method}(${args.map(String).join(", ")})`);
