@@ -2155,6 +2155,36 @@ function FilterPickerOverlay({ filters, suggestedFilter, onPick, onClose }) {
 }
 
 /* ===== INTERACTIVE GUIDE ===== */
+/* ===== DISCONNECT PILL =====
+   Small yellow warning at the top of every screen once the sensor has been
+   unexpectedly disconnected for more than 1 s (quick blips that reconnect
+   right away never show it). Gone as soon as a sensor connects again. */
+const DISCONNECT_PILL_DELAY_MS = 1000;
+
+function DisconnectPill({ lastDisconnect, connected, reconnecting }) {
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    if (connected || !lastDisconnect) return;
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [connected, lastDisconnect]);
+  if (connected || !lastDisconnect) return null;
+  const downMs = nowMs - lastDisconnect.at;
+  if (downMs <= DISCONNECT_PILL_DELAY_MS) return null;
+  return (
+    <div role="status" aria-live="polite" style={{
+      position: "fixed", top: "calc(env(safe-area-inset-top, 0px) + 8px)", left: "50%", transform: "translateX(-50%)",
+      zIndex: 99998, maxWidth: "calc(100% - 24px)", padding: "6px 12px", borderRadius: 16,
+      background: "#fcf4d6", color: "#684e00", border: `1px solid ${T.warning}`,
+      boxShadow: "0 2px 8px rgba(0,0,0,.15)", fontSize: 13, fontWeight: 500,
+      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none",
+    }}>
+      ⚠ Sensor desconectado há {formatDuration(downMs)}{reconnecting ? " · reconectando…" : ""}
+    </div>
+  );
+}
+
 /* ===== WEB TUTORIAL =====
    How to use the web version (browser, connecting, readings, offline, BI).
    Shown on the first visit and reopened from the "?" in the bottom bar. */
@@ -3613,6 +3643,7 @@ function App() {
         onDisconnect={appBle.disconnect}
       />
         <InitialGuide step={guideStep} onNext={advanceInitialGuide} onSkip={skipInitialGuide} />
+        <DisconnectPill lastDisconnect={lastDisconnect} connected={appBle.connected} reconnecting={appBle.scanning || appBle.connectionStatus === "Connecting"} />
         <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
       </>
     );
@@ -3635,6 +3666,7 @@ function App() {
           onWait={waitForReconnect}
           onRestartApp={restartApp}
         />
+        <DisconnectPill lastDisconnect={lastDisconnect} connected={appBle.connected} reconnecting={appBle.scanning || appBle.connectionStatus === "Connecting"} />
         <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
       </>
     );
@@ -3703,6 +3735,7 @@ function App() {
         onWait={waitForReconnect}
         onRestartApp={restartApp}
       />
+      <DisconnectPill lastDisconnect={lastDisconnect} connected={appBle.connected} reconnecting={appBle.scanning || appBle.connectionStatus === "Connecting"} />
       <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
     </div>
     {sensorWarning && (
