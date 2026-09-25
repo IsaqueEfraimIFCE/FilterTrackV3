@@ -17,7 +17,8 @@
   // BI "user" (read-only) access key, handed to the dashboard in the URL
   // fragment (#key=...) so it signs in on open. The fragment never reaches
   // the server. Anyone who can open this web app can read this key.
-  const BI_USER_KEY = "";
+  // Set by bi-config.js (deployed with the site, kept out of git).
+  const BI_USER_KEY = window.FILTERTRACK_BI_USER_KEY || "";
   const biLink = (query = "") =>
     `${BI_URL}${query}${BI_USER_KEY ? `#key=${encodeURIComponent(BI_USER_KEY)}` : ""}`;
   const OTA_MAX_BYTES = 4 * 1024 * 1024;
@@ -55,7 +56,7 @@
       }).catch(() => {});
     } catch {}
   }
-  remoteLog(`bridge v6 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
+  remoteLog(`bridge v7 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
 
   // Offline shell (sw.js). Not every WebBLE browser allows service workers —
   // Bluefy runs on WKWebView, where they need the host app's opt-in — so
@@ -548,9 +549,16 @@
     const isCsv = location.pathname.endsWith("csv-analysis.html");
     bar.innerHTML = `
       <a href="index.html" style="padding:6px 10px;background:#0068B4;color:#fff;text-decoration:none;border-radius:2px;opacity:${isCsv ? 1 : 0.35}">Monitor</a>
-      <a href="csv-analysis.html" style="padding:6px 10px;background:#0068B4;color:#fff;text-decoration:none;border-radius:2px;opacity:${isCsv ? 0.35 : 1}">CSV</a>
+      <a href="csv-analysis.html" data-guide="native-csv" style="padding:6px 10px;background:#0068B4;color:#fff;text-decoration:none;border-radius:2px;opacity:${isCsv ? 0.35 : 1}">CSV</a>
       <a href="${biLink()}" target="_blank" rel="noopener" style="padding:6px 10px;background:#009ca6;color:#fff;text-decoration:none;border-radius:2px;">BI</a>
+      <button data-ft-help aria-label="Tutorial" title="Tutorial" style="width:28px;padding:6px 0;background:#fff;color:#0068B4;border:1px solid #0068B4;border-radius:14px;font:700 12px system-ui,sans-serif;">?</button>
     `;
+    // The tutorial lives in index.html (window.FilterTrackOpenTutorial);
+    // from other pages, go there and ask for it.
+    bar.querySelector("[data-ft-help]").onclick = () => {
+      if (typeof window.FilterTrackOpenTutorial === "function") window.FilterTrackOpenTutorial();
+      else location.href = "index.html?tutorial=1";
+    };
     document.body.appendChild(bar);
   }
 

@@ -15,7 +15,8 @@
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
 <script src="vendor/babel.min.js"></script>
-<script src="bridge.js?v=6"></script>
+<script src="bi-config.js?v=7"></script>
+<script src="bridge.js?v=7"></script>
 <style>
 :root {
   --cagece-blue: #0068B4; --cagece-blue-hover: #0058a0; --cagece-blue-active: #00477f;
@@ -2154,6 +2155,83 @@ function FilterPickerOverlay({ filters, suggestedFilter, onPick, onClose }) {
 }
 
 /* ===== INTERACTIVE GUIDE ===== */
+/* ===== WEB TUTORIAL =====
+   How to use the web version (browser, connecting, readings, offline, BI).
+   Shown on the first visit and reopened from the "?" in the bottom bar. */
+const WEB_TUTORIAL_SEEN_KEY = "ft_webTutorialSeen";
+
+function detectWebPlatform() {
+  const ua = navigator.userAgent || "";
+  return {
+    bluefy: /Bluefy/i.test(ua),
+    ios: /iPhone|iPad|iPod/i.test(ua),
+    android: /Android/i.test(ua),
+    bluetooth: "bluetooth" in navigator,
+  };
+}
+
+function webTutorialSteps(pf) {
+  const browserStep = pf.ios
+    ? (pf.bluefy
+        ? { title: "Você está no Bluefy ✓", body: "No iPhone o Safari não tem Bluetooth. Use sempre o Bluefy para abrir esta página — é o navegador certo." }
+        : { title: "Use o app Bluefy", body: "No iPhone o Safari não tem Bluetooth. Instale o Bluefy (gratuito na App Store) e abra este mesmo endereço nele.", warn: true })
+    : pf.android
+      ? { title: "Chrome no Android", body: "O Chrome conecta ao sensor direto pela página. Para conexão automática e gravação com a tela apagada, instale o app Android pelo aviso “Instalar” no topo." }
+      : { title: "Chrome no computador", body: pf.bluetooth
+          ? "Este navegador tem Bluetooth. Deixe a página aberta: no computador ela continua recebendo dados mesmo em segundo plano (evite que o notebook entre em suspensão)."
+          : "Este navegador não tem Bluetooth. Use o Chrome ou o Edge.", warn: !pf.bluetooth };
+  return [
+    { title: "Bem-vindo ao FilterTrack", body: "Esta página acompanha o nível da água do filtro de areia pelo sensor FilterTrack, via Bluetooth, direto do navegador. São poucos passos." },
+    browserStep,
+    { title: "Conectar ao sensor", body: pf.ios
+        ? "A página procura o sensor sozinha. Na lista que aparece, toque em FilterTrackV3. A conexão e as leituras começam em seguida."
+        : "Toque em “Procurar dispositivos” (ou em qualquer lugar da tela de espera) e escolha FilterTrackV3 na lista. A conexão e as leituras começam em seguida." },
+    { title: "Velocidade e vazão", body: "A velocidade (variação do nível) e a vazão aparecem após uma janela de 10 segundos e são atualizadas a cada 10 s. Abaixo de 0,25 m/min o filtro é considerado parado — o limite pode ser ajustado em Ajustes." },
+    { title: "Se o sensor desconectar", body: `Aparece o aviso vermelho “Sensor desconectado”, com o horário${pf.android ? " (e o celular vibra)" : ""}. A sessão é salva. ${pf.ios || pf.android ? "No celular, mantenha a página aberta e a tela ligada: em segundo plano o navegador pausa a página." : "Mantenha a página aberta."}` },
+    { title: "Sem internet? Sem problema", body: `As sessões ficam guardadas no aparelho e são enviadas sozinhas quando a internet voltar.${pf.ios ? " No iPhone, abra a página com internet ao menos uma vez por semana." : ""}` },
+    { title: "Barra inferior", body: "Monitor: a medição. CSV: analisar arquivos de medição. BI: painel de indicadores, que já abre conectado. O “?” abre este tutorial de novo." },
+    { title: "Tudo pronto", body: "Você pode ver também uma demonstração guiada das telas do app, com uma medição de exemplo.", last: true },
+  ];
+}
+
+function WebTutorial({ open, onClose, onDemo }) {
+  const pf = useMemo(detectWebPlatform, []);
+  const steps = useMemo(() => webTutorialSteps(pf), [pf]);
+  const [i, setI] = useState(0);
+  useEffect(() => { if (open) setI(0); }, [open]);
+  if (!open) return null;
+  const step = steps[i];
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="web-tutorial-title"
+      style={{ position: "fixed", inset: 0, zIndex: 100001, background: "rgba(8,12,20,.58)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ width: "100%", maxWidth: 440, background: T.canvas, borderTop: `4px solid ${step.warn ? T.danger : T.blue}`, boxShadow: "0 12px 36px rgba(0,0,0,.32)", padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ color: T.blue, fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>
+            Tutorial · {i + 1} de {steps.length}
+          </div>
+          <button onClick={onClose} aria-label="Fechar tutorial" style={{ fontSize: 18, color: T.inkMuted, padding: 4 }}>✕</button>
+        </div>
+        <div id="web-tutorial-title" style={{ fontSize: 20, fontWeight: 600, margin: "8px 0" }}>{step.title}</div>
+        <div style={{ fontSize: 15, color: T.inkMuted, lineHeight: 1.45 }}>{step.body}</div>
+        <div style={{ display: "flex", gap: 4, margin: "16px 0" }}>
+          {steps.map((_, k) => <div key={k} style={{ flex: 1, height: 3, background: k <= i ? T.blue : T.surface2 }} />)}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {i > 0 && <Btn kind="tertiary" full onClick={() => setI(i - 1)}>Voltar</Btn>}
+          {step.last ? (
+            <>
+              <Btn kind="tertiary" full onClick={() => { onClose(); onDemo(); }}>Ver demonstração</Btn>
+              <Btn full onClick={onClose}>Começar</Btn>
+            </>
+          ) : (
+            <Btn full onClick={() => setI(i + 1)}>Próximo</Btn>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const INITIAL_GUIDE_STEPS = [
   { eyebrow: "Guia · 1 de 13", title: "Bem-vindo ao FilterTrack", body: "Vamos conhecer o app juntos. Você vai usar os mesmos botões do dia a dia e acompanhar uma medição de exemplo, sem precisar conectar um sensor. Nada desta demonstração será salvo.", next: "Começar o passeio" },
   { eyebrow: "Guia · 2 de 13", title: "Sensor e filtro", body: "Aqui você confirma a estação, a área do filtro, a conexão e a força do sinal.", target: "minimal-header", next: "Continuar" },
@@ -2177,7 +2255,9 @@ function InitialGuide({ step, onNext, onSkip }) {
     let cancelled = false;
     const locate = () => {
       if (cancelled) return;
-      if (item.target === "native-csv") {
+      // In the web app the CSV link is a real element in the bottom bar
+      // (data-guide="native-csv"); the Android app's native button is not.
+      if (item.target === "native-csv" && !document.querySelector('[data-guide="native-csv"]')) {
         setTargetRect({ left: window.innerWidth - 70, top: window.innerHeight - 188, width: 60, height: 60, right: window.innerWidth - 10, bottom: window.innerHeight - 128 });
         return;
       }
@@ -2648,6 +2728,20 @@ function App() {
   // Last unexpected sensor disconnect ({ at, deviceName, sessionKept }),
   // cleared when a sensor connects again.
   const [lastDisconnect, setLastDisconnect] = useState(null);
+  // Web tutorial: opens on the first visit (or ?tutorial=1), then only from "?".
+  const [tutorialOpen, setTutorialOpen] = useState(() => {
+    if (new URLSearchParams(location.search).get("tutorial") === "1") return true;
+    if (window.__filterTrackGuideRequested) return false;
+    try { return localStorage.getItem(WEB_TUTORIAL_SEEN_KEY) !== "1"; } catch (_) { return true; }
+  });
+  const closeTutorial = useCallback(() => {
+    setTutorialOpen(false);
+    try { localStorage.setItem(WEB_TUTORIAL_SEEN_KEY, "1"); } catch (_) {}
+  }, []);
+  useEffect(() => {
+    window.FilterTrackOpenTutorial = () => setTutorialOpen(true);
+    return () => { delete window.FilterTrackOpenTutorial; };
+  }, []);
   useEffect(() => {
     document.title = lastDisconnect ? "Sensor desconectado · FilterTrack" : "FilterTrack";
   }, [lastDisconnect]);
@@ -3519,6 +3613,7 @@ function App() {
         onDisconnect={appBle.disconnect}
       />
         <InitialGuide step={guideStep} onNext={advanceInitialGuide} onSkip={skipInitialGuide} />
+        <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
       </>
     );
   }
@@ -3540,6 +3635,7 @@ function App() {
           onWait={waitForReconnect}
           onRestartApp={restartApp}
         />
+        <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
       </>
     );
   }
@@ -3607,6 +3703,7 @@ function App() {
         onWait={waitForReconnect}
         onRestartApp={restartApp}
       />
+      <WebTutorial open={tutorialOpen} onClose={closeTutorial} onDemo={startInitialGuide} />
     </div>
     {sensorWarning && (
       <div role="alert" style={{ position: "fixed", left: 16, right: 16, bottom: 82, zIndex: 9000, maxWidth: 520, margin: "0 auto", padding: "14px 16px", background: "#161616", color: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,.3)", fontSize: 14 }}>
