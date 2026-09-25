@@ -9,6 +9,17 @@
 // use the Bluefy app there. Chrome/Edge on Android and desktop work directly.
 
 (() => {
+  // One address for everyone: https://filtertrack-web.fly.dev/ always serves
+  // the latest deploy (no-cache headers + network-first service worker), so
+  // old "?v=N" links just drop the parameter from the address bar.
+  try {
+    const url = new URL(location.href);
+    if (url.searchParams.has("v")) {
+      url.searchParams.delete("v");
+      history.replaceState(history.state, "", url.pathname + (url.search || "") + url.hash);
+    }
+  } catch {}
+
   const SERVICE_UUID = "000000ff-0000-1000-8000-00805f9b34fb";
   const CHAR_CMD_NOTIFY_UUID = "0000ff01-0000-1000-8000-00805f9b34fb";
   const CHAR_OTA_UUID = "0000ff02-0000-1000-8000-00805f9b34fb";
@@ -56,7 +67,7 @@
       }).catch(() => {});
     } catch {}
   }
-  remoteLog(`bridge v10 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
+  remoteLog(`bridge v11 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
 
   // Offline shell (sw.js). Not every WebBLE browser allows service workers —
   // Bluefy runs on WKWebView, where they need the host app's opt-in — so
