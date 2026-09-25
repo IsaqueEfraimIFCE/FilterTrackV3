@@ -56,7 +56,7 @@
       }).catch(() => {});
     } catch {}
   }
-  remoteLog(`bridge v8 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
+  remoteLog(`bridge v9 loaded; bluetooth=${"bluetooth" in navigator}; ua=${navigator.userAgent}`);
 
   // Offline shell (sw.js). Not every WebBLE browser allows service workers —
   // Bluefy runs on WKWebView, where they need the host app's opt-in — so
@@ -544,7 +544,7 @@
     const bar = document.createElement("div");
     bar.setAttribute("data-ft-shell-nav", "");
     bar.style.cssText =
-      "position:fixed;left:8px;bottom:8px;z-index:99999;display:flex;gap:6px;" +
+      "position:fixed;left:8px;bottom:calc(8px + env(safe-area-inset-bottom, 0px));z-index:99999;display:flex;gap:6px;" +
       "font:12px system-ui,sans-serif;";
     const isCsv = location.pathname.endsWith("csv-analysis.html");
     bar.innerHTML = `

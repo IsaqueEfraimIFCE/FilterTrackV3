@@ -15,8 +15,8 @@
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
 <script src="vendor/babel.min.js"></script>
-<script src="bi-config.js?v=8"></script>
-<script src="bridge.js?v=8"></script>
+<script src="bi-config.js?v=9"></script>
+<script src="bridge.js?v=9"></script>
 <style>
 :root {
   --cagece-blue: #0068B4; --cagece-blue-hover: #0058a0; --cagece-blue-active: #00477f;
@@ -35,7 +35,14 @@ html, body {
   font-family: var(--font-sans); font-size: 16px; line-height: 1.5;
   -webkit-font-smoothing: antialiased; overflow: hidden;
 }
-#root { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+/* 100dvh = the height actually visible: on phones 100vh also counts the area
+   behind the browser's address bar, which pushed the bottom of the first
+   screen (install card, "Abrir app completo") out of sight. The bottom
+   padding keeps content clear of bridge.js's fixed Monitor/CSV/BI/? bar. */
+#root {
+  width: 100vw; height: 100vh; height: 100dvh; display: flex; flex-direction: column;
+  padding-bottom: calc(46px + env(safe-area-inset-bottom, 0px));
+}
 input, select, button, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; background: none; border: none; }
 a { color: var(--cagece-blue); text-decoration: none; }
@@ -106,12 +113,13 @@ const EXCLUDED_FILTER_NAME_PATTERNS = [
   "filtro rapido eta sul", "filtro ascendente de teste", "filtro setor industrial",
 ];
 const DEFAULT_FILTERS = JSON.parse(document.getElementById("ft-default-filters").textContent);
-// Minimal mode: fixed sand-filter installation. Locked to FIL-01 Asc · ETA
-// PRIMAVERA (id from the embedded catalog, with a station/name fallback in
-// case a catalog sync reassigns ids).
-const MINIMAL_FILTER_ID = "b3bb9015";
+// Standard filter: FIL-01 Asc · ETA SÍTIOS NOVOS (Caucaia, 3.15 m²). Minimal
+// mode is locked to it and the full app starts with it selected (id from the
+// embedded catalog, with a station/name fallback in case a catalog sync
+// reassigns ids).
+const MINIMAL_FILTER_ID = "3a89dba8";
 const MINIMAL_FILTER_MATCH = f =>
-  /primavera/i.test(String(f.station || "")) && /\basc\b/i.test(String(f.name || ""));
+  /s[ií]tios\s+novos/i.test(String(f.station || "")) && /^fil-?0?1\b.*\basc\b/i.test(String(f.name || ""));
 const SAND_MODE_REASSERT_MS = 5000;
 
 /* ===== UTILITIES ===== */
@@ -2076,7 +2084,7 @@ function SettingsTab({ serverUrl, setServerUrl, ble, activeSessionMeta, onEndSes
       <Tile data-guide="settings-minimal" padding={16}>
         <div style={{ fontSize: 12, color: T.inkMuted, letterSpacing: 0.32, textTransform: "uppercase", marginBottom: 12 }}>Modo simplificado</div>
         <div style={{ fontSize: 13, color: T.inkSubtle, marginBottom: 12 }}>
-          Tela única para o filtro fixo de areia (ETA PRIMAVERA): conexão automática, sessões automáticas por lavagem e sincronização em segundo plano.
+          Tela única para o filtro fixo de areia (ETA SÍTIOS NOVOS): conexão automática, sessões automáticas por lavagem e sincronização em segundo plano.
         </div>
         <Btn kind="secondary" full onClick={() => onEnterMinimal?.()}>Usar modo simplificado</Btn>
       </Tile>
@@ -2321,7 +2329,7 @@ const INITIAL_GUIDE_STEPS = [
   { eyebrow: "Guia · 5 de 13", title: "Abra o modo completo", body: "Toque no controle destacado. É exatamente assim que você muda de modo durante o uso normal.", target: "open-full", requireTargetTap: true },
   { eyebrow: "Guia · 6 de 13", title: "Monitor completo", body: "Neste modo você escolhe filtros, controla sessões e acessa mais detalhes da medição.", target: "full-monitor", next: "Ver Ajustes" },
   { eyebrow: "Guia · 7 de 13", title: "Abra Ajustes", body: "Toque na aba Ajustes destacada para conhecer configurações e o caminho de volta.", target: "tab-settings", requireTargetTap: true },
-  { eyebrow: "Guia · 8 de 13", title: "Volte ao simplificado", body: "Este é o controle real para retornar à operação automática da ETA Primavera. Toque nele agora.", target: "settings-minimal", requireTargetTap: true },
+  { eyebrow: "Guia · 8 de 13", title: "Volte ao simplificado", body: "Este é o controle real para retornar à operação automática da ETA Sítios Novos. Toque nele agora.", target: "settings-minimal", requireTargetTap: true },
   { eyebrow: "Guia · 9 de 13", title: "Abra o analisador CSV", body: "Toque no botão CSV destacado no canto inferior direito. Ele funciona offline e abrirá dados de exemplo.", target: "native-csv", requireTargetTap: true },
 ];
 
@@ -2771,7 +2779,7 @@ function App() {
   const ble = useBLE();
 
   const [filters, setFilters] = useState(() => mergeDefaultFilters(loadJson(STORAGE.filters, [])));
-  const [selectedFilterId, setSelectedFilterId] = useState(() => loadText(STORAGE.selectedFilterId, ""));
+  const [selectedFilterId, setSelectedFilterId] = useState(() => loadText(STORAGE.selectedFilterId, MINIMAL_FILTER_ID));
   const [knownDevices, setKnownDevices] = useState(() => { const l = loadJson(STORAGE.knownDevices, []); return Array.isArray(l) ? l : []; });
   const [serverUrl, setServerUrl] = useState(() => {
     const s = loadText(STORAGE.serverUrl, DEFAULT_SERVER_URL).trim();
@@ -2837,7 +2845,7 @@ function App() {
   const minimalFilter = useMemo(() =>
     filters.find(f => f.id === MINIMAL_FILTER_ID) || filters.find(MINIMAL_FILTER_MATCH) || null,
     [filters]);
-  // Minimal mode always operates on the fixed Primavera Asc filter; the full
+  // Minimal mode always operates on the standard Sítios Novos FIL-01 Asc filter; the full
   // app keeps whatever the user selected.
   const effectiveFilter = minimalMode ? (minimalFilter || selectedFilter) : selectedFilter;
   const knownDeviceMap = useMemo(() => {
